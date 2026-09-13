@@ -1,8 +1,8 @@
 <?php
 trait MCU_Update_Operations_Trait {
     private function get_available_updates() {
-        $custom_repo_url = get_option('marrison_repo_url');
-        $repo_url = !empty($custom_repo_url) ? trailingslashit($custom_repo_url) : $this->updates_url;
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return [];
+        $repo_url = trailingslashit((string) get_option('marrison_repo_url', ''));
         if (empty($repo_url)) return [];
         $cached = get_transient('marrison_available_updates_v2');
         if ($cached !== false && is_array($cached)) {
@@ -66,6 +66,7 @@ trait MCU_Update_Operations_Trait {
     }
 
     private function get_available_theme_updates() {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return [];
         $repo_url = get_option('marrison_themes_repo_url');
         if (empty($repo_url)) return [];
         $repo_url = trailingslashit($repo_url);
@@ -125,11 +126,19 @@ trait MCU_Update_Operations_Trait {
 
     private function mcu_private_repo_status($type = 'plugin') {
         $type = $type === 'theme' ? 'theme' : 'plugin';
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return [
+                'configured' => false,
+                'reachable'  => false,
+                'class'      => 'warning',
+                'icon'       => 'warning',
+                'message'    => __('Repository disponibile solo per siti autorizzati da Marrison Commander.', 'marrison-custom-updater'),
+            ];
+        }
         if ($type === 'theme') {
             $repo_url = get_option('marrison_themes_repo_url');
         } else {
-            $custom_repo_url = get_option('marrison_repo_url');
-            $repo_url = !empty($custom_repo_url) ? $custom_repo_url : $this->updates_url;
+            $repo_url = get_option('marrison_repo_url', '');
         }
         $repo_url = !empty($repo_url) ? trailingslashit($repo_url) : '';
 

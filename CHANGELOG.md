@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.5] - 2026-09-08
+
+### Changed
+- Gli URL dei repository privati per plugin e temi vengono ricevuti da Marrison Commander tramite il canale MCU autenticato.
+- Rimossa la modifica manuale degli URL dalla pagina impostazioni di MCU; gli option WordPress restano una cache operativa solo per siti autorizzati da Commander.
+- I siti non autorizzati non possono usare i vecchi URL locali; la rimozione di un sito da Commander prova a revocare anche l'accesso al client MCU.
+
+### Fixed
+- Corretto il riepilogo status inviato a Commander: ora include gli aggiornamenti dei temi privati già presenti nella cache MCU e usa lo stesso conteggio delle traduzioni mostrato nel pannello WordPress.
+- Corretto il riferimento al metodo di controllo dell'autorizzazione repository, che in una distribuzione incoerente poteva causare un errore HTTP 500 sull'endpoint status.
+- Se un aggiornamento automatico viene interrotto o termina in errore lasciando attiva la programmazione ma senza prossimo evento cron, MCU rigenera automaticamente la prossima esecuzione; la scheda Programmazione ripara anche i siti gia rimasti in quello stato.
+
 ## [9.8.4] - 2026-08-24
 
 ### Fixed

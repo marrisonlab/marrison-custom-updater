@@ -1,6 +1,6 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.4-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.5-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
 [![WordPress Version](https://img.shields.io/badge/WordPress-6.0%2B-green.svg)](https://wordpress.org)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-green.svg)](https://php.net)
 [![License](https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -22,7 +22,7 @@
 
 1. Upload the `marrison-custom-updater` folder to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
-3. Go to 'Marrison Updater' > 'Settings' to configure your private repository URL
+3. Configure the private plugin/theme repository URLs in Marrison Commander > Impostazioni
 
 ## 📋 Requirements
 
@@ -32,6 +32,12 @@
 - Access to plugin files for backup/restore operations
 
 ## 🔄 Version History
+
+### [9.8.5] - 2026-09-08
+
+- Gli URL dei repository privati per plugin e temi vengono gestiti centralmente da Marrison Commander e distribuiti ai client MCU tramite richieste autenticate.
+- La modifica manuale degli URL è stata rimossa dalle impostazioni di MCU; gli option locali restano una cache operativa solo per siti autorizzati da Commander.
+- I siti non autorizzati non possono usare i vecchi URL locali; la rimozione da Commander prova a revocare l'accesso al client MCU.
 
 ### [9.8.4] - 2026-08-24
 
@@ -271,14 +277,19 @@
 
 ### Repository Plugin
 
-1. Vai su **Marrison Updater** > **Impostazioni**
-2. Inserisci l'URL del tuo repository privato nella sezione "Repository Plugin"
-3. Salva le impostazioni
+1. Vai su **Marrison Commander** > **Impostazioni**
+2. Inserisci l'URL del repository privato plugin nella sezione "Repository privati MCU"
+3. Salva le impostazioni; Commander lo distribuirà ai client MCU autenticati
 
 ### Repository Temi
 
-1. Nella stessa pagina "Impostazioni", inserisci l'URL del repository temi
+1. Nella stessa sezione di Commander inserisci l'URL del repository privato temi
 2. Salva le impostazioni
+
+Gli URL locali non sono sufficienti per autorizzare un sito: MCU li usa solo dopo
+aver ricevuto una configurazione firmata da Commander. Un sito rimosso da Commander
+viene revocato prima della rimozione; lasciare vuoto un campo disattiva quel
+repository sui client alla successiva verifica o sincronizzazione.
 
 ### Aggiornamenti Automatici
 

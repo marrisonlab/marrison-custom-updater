@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.4
+Stable tag: 9.8.5
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -31,9 +31,14 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 1.  Carica la cartella `marrison-custom-updater` nella directory `/wp-content/plugins/` del tuo sito.
 2.  Attiva il plugin dal menu 'Plugin' di WordPress.
-3.  Vai su 'Marrison Updater' > 'Impostazioni' per configurare l'URL del tuo repository privato.
+3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.5 =
+* **Cambiamento**: Gli URL dei repository privati per plugin e temi vengono gestiti centralmente da Marrison Commander e distribuiti ai client MCU tramite richieste autenticate.
+* **Cambiamento**: Rimossa la modifica manuale degli URL dalla pagina impostazioni di MCU; gli option locali restano una cache operativa solo per siti autorizzati da Commander.
+* **Sicurezza**: I siti non autorizzati non possono usare vecchi URL locali; la rimozione da Commander prova a revocare l'accesso al client MCU.
 
 = 9.8.4 =
 * **Fix**: Il backup database non fallisce piu sui siti con tabelle MyISAM o engine non transazionali: in questi casi MCU usa un lock di lettura sulle tabelle per creare un dump coerente.

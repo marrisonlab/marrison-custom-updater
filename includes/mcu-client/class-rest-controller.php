@@ -67,6 +67,12 @@ final class Rest_Controller {
 			);
 		}
 
+		Plugin::enforce_repository_access();
+
+		// Commander is the source of truth for private repository URLs. The
+		// payload is accepted only after the normal HMAC authentication above.
+		Settings::sync_repository_config( $request->get_param( 'repository_config' ) );
+
 		$data = self::collect_status();
 
 		Debug_Logger::log(
@@ -109,9 +115,9 @@ final class Rest_Controller {
 		$core_updates        = get_site_transient( 'update_core' );
 		$plugin_update_items = self::plugin_update_items( $plugins, $plugin_updates );
 		$plugin_update_count = count( $plugin_update_items );
-		$theme_update_count  = self::object_response_count( $theme_updates );
+		$theme_update_count  = self::theme_update_count( $theme_updates );
 		$core_update_count   = self::core_update_count( $core_updates );
-		$translation_count   = self::translation_update_count( $plugin_updates ) + self::translation_update_count( $theme_updates ) + self::translation_update_count( $core_updates );
+		$translation_count   = self::translation_update_count( $plugin_updates, $theme_updates, $core_updates );
 		$mcu_update_count    = self::plugin_update_type_count( $plugin_update_items, 'private' );
 		$total_update_count  = $plugin_update_count + $theme_update_count + $translation_count + $core_update_count;
 		$last_checked        = max(
@@ -198,7 +204,7 @@ final class Rest_Controller {
 		} catch ( \Throwable $exception ) {
 			return array(
 				'supported_read_operations'  => array(),
-				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot' ),
+				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot', 'revoke_repository_config' ),
 				'snapshot'                   => array(
 					'available' => false,
 					'status'    => 'unavailable',
@@ -331,7 +337,7 @@ final class Rest_Controller {
 		$items = array();
 		$seen  = array();
 
-		$private_updates = get_transient( 'marrison_available_updates_v2' );
+		$private_updates = Settings::repository_config_managed() ? get_transient( 'marrison_available_updates_v2' ) : array();
 		if ( is_array( $private_updates ) ) {
 			foreach ( $private_updates as $update ) {
 				if ( ! is_array( $update ) || empty( $update['slug'] ) ) {
@@ -731,6 +737,76 @@ final class Rest_Controller {
 	}
 
 	/**
+	 * Count public and authorized private theme updates.
+	 *
+	 * Private theme metadata is cached separately by MCU and is not always
+	 * injected into the WordPress theme transient during a REST request.
+	 *
+	 * @param mixed $transient Update transient.
+	 * @return int
+	 */
+	private static function theme_update_count( $transient ) {
+		$count = self::object_response_count( $transient );
+		if ( ! Settings::repository_config_managed() ) {
+			return $count;
+		}
+
+		$private_updates = get_transient( 'marrison_available_theme_updates' );
+		if ( ! is_array( $private_updates ) ) {
+			return $count;
+		}
+
+		$seen = array();
+		if ( is_object( $transient ) && isset( $transient->response ) && is_array( $transient->response ) ) {
+			foreach ( $transient->response as $slug => $update ) {
+				$seen[ sanitize_key( (string) $slug ) ] = true;
+			}
+		}
+
+		$excluded = get_option( 'marrison_excluded_themes', array() );
+		$excluded = is_array( $excluded ) ? array_map( 'sanitize_key', $excluded ) : array();
+		$themes   = function_exists( 'wp_get_themes' ) ? wp_get_themes() : array();
+
+		foreach ( $private_updates as $update ) {
+			if ( ! is_array( $update ) || empty( $update['slug'] ) || empty( $update['version'] ) ) {
+				continue;
+			}
+
+			$slug = sanitize_key( (string) $update['slug'] );
+			if ( '' === $slug || in_array( $slug, $excluded, true ) ) {
+				continue;
+			}
+
+			$theme = wp_get_theme( $slug );
+			if ( ! $theme->exists() && ! empty( $update['name'] ) ) {
+				foreach ( $themes as $theme_slug => $theme_object ) {
+					if (
+						strcasecmp( (string) $theme_object->get( 'Name' ), (string) $update['name'] ) === 0
+						|| (string) $theme_object->get( 'TextDomain' ) === $slug
+					) {
+						$theme      = $theme_object;
+						$slug       = sanitize_key( (string) $theme_slug );
+						break;
+					}
+				}
+			}
+
+			if (
+				! $theme->exists()
+				|| isset( $seen[ $slug ] )
+				|| ! version_compare( (string) $theme->get( 'Version' ), (string) $update['version'], '<' )
+			) {
+				continue;
+			}
+
+			$seen[ $slug ] = true;
+			$count++;
+		}
+
+		return $count;
+	}
+
+	/**
 	 * Count core updates that require an upgrade.
 	 *
 	 * @param mixed $transient Core update transient.
@@ -757,12 +833,27 @@ final class Rest_Controller {
 	 * @param mixed $transient Update transient.
 	 * @return int
 	 */
-	private static function translation_update_count( $transient ) {
-		if ( is_object( $transient ) && isset( $transient->translations ) && is_array( $transient->translations ) ) {
-			return count( $transient->translations );
+	private static function translation_update_count( $plugin_updates, $theme_updates, $core_updates ) {
+		$translation_file = ABSPATH . 'wp-admin/includes/translation-install.php';
+		if ( ! function_exists( 'wp_get_translation_updates' ) && file_exists( $translation_file ) ) {
+			require_once $translation_file;
 		}
 
-		return 0;
+		if ( function_exists( 'wp_get_translation_updates' ) ) {
+			$updates = wp_get_translation_updates();
+			if ( is_array( $updates ) ) {
+				return count( $updates );
+			}
+		}
+
+		$count = 0;
+		foreach ( array( $plugin_updates, $theme_updates, $core_updates ) as $transient ) {
+			if ( is_object( $transient ) && isset( $transient->translations ) && is_array( $transient->translations ) ) {
+				$count += count( $transient->translations );
+			}
+		}
+
+		return $count;
 	}
 
 	/**

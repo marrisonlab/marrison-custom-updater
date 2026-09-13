@@ -16,6 +16,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class Settings {
 	const OPTION_NAME = 'mcu_maintenance_client_settings';
+	const PLUGIN_REPOSITORY_OPTION = 'marrison_repo_url';
+	const THEME_REPOSITORY_OPTION  = 'marrison_themes_repo_url';
 
 	/**
 	 * Default option values.
@@ -35,6 +37,8 @@ final class Settings {
 			'last_dashboard_access_at'        => 0,
 			'last_dashboard_access_ip'        => '',
 			'last_dashboard_access_result'    => 'never',
+			'repository_config_managed'       => false,
+			'repository_config_synced_at'     => 0,
 		);
 	}
 
@@ -316,5 +320,100 @@ final class Settings {
 	public static function debug_enabled() {
 		$settings = self::get();
 		return ! empty( $settings['debug_enabled'] );
+	}
+
+	/**
+	 * Apply repository URLs received from the authenticated Commander request.
+	 *
+	 * The legacy WordPress options remain the runtime cache so the updater and
+	 * its existing integrations keep working. Commander is the source of truth
+	 * when the payload explicitly marks the configuration as managed.
+	 *
+	 * @param mixed $config Repository configuration payload.
+	 * @return bool Whether a managed configuration was applied.
+	 */
+	public static function sync_repository_config( $config ) {
+		if ( ! is_array( $config ) || empty( $config['managed'] ) ) {
+			return false;
+		}
+
+		$plugin_url = self::sanitize_repository_url( isset( $config['plugin_url'] ) ? $config['plugin_url'] : '' );
+		$theme_url  = self::sanitize_repository_url( isset( $config['theme_url'] ) ? $config['theme_url'] : '' );
+		$old_plugin = (string) get_option( self::PLUGIN_REPOSITORY_OPTION, '' );
+		$old_theme  = (string) get_option( self::THEME_REPOSITORY_OPTION, '' );
+		$changed    = $old_plugin !== $plugin_url || $old_theme !== $theme_url || ! self::repository_config_managed();
+
+		if ( $changed ) {
+			update_option( self::PLUGIN_REPOSITORY_OPTION, $plugin_url, false );
+			update_option( self::THEME_REPOSITORY_OPTION, $theme_url, false );
+
+			$settings                               = self::get();
+			$settings['repository_config_managed']   = true;
+			$settings['repository_config_synced_at'] = time();
+			self::save( $settings );
+
+			if ( $old_plugin !== $plugin_url || $old_theme !== $theme_url ) {
+				self::clear_repository_caches();
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Return whether Commander has taken ownership of repository settings.
+	 *
+	 * @return bool
+	 */
+	public static function repository_config_managed() {
+		$settings = self::get();
+		return ! empty( $settings['repository_config_managed'] );
+	}
+
+	/**
+	 * Revoke private repository access and remove the local runtime cache.
+	 *
+	 * @return void
+	 */
+	public static function revoke_repository_config() {
+		delete_option( self::PLUGIN_REPOSITORY_OPTION );
+		delete_option( self::THEME_REPOSITORY_OPTION );
+
+		$settings                               = self::get();
+		$settings['repository_config_managed']   = false;
+		$settings['repository_config_synced_at'] = 0;
+		self::save( $settings );
+		self::clear_repository_caches();
+	}
+
+	/**
+	 * Normalize a repository URL received from Commander.
+	 *
+	 * @param mixed $url Raw URL.
+	 * @return string
+	 */
+	private static function sanitize_repository_url( $url ) {
+		$url = trim( (string) $url );
+		if ( '' === $url ) {
+			return '';
+		}
+
+		$url = esc_url_raw( $url, array( 'http', 'https' ) );
+		return '' !== $url ? untrailingslashit( $url ) : '';
+	}
+
+	/**
+	 * Clear cached metadata after a repository configuration change.
+	 *
+	 * @return void
+	 */
+	private static function clear_repository_caches() {
+		delete_transient( 'marrison_available_updates' );
+		delete_transient( 'marrison_available_updates_v2' );
+		delete_transient( 'marrison_updates_fetch_failed' );
+		delete_site_transient( 'update_plugins' );
+		delete_transient( 'marrison_available_theme_updates' );
+		delete_transient( 'marrison_theme_updates_fetch_failed' );
+		delete_site_transient( 'update_themes' );
 	}
 }

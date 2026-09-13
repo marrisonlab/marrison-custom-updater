@@ -287,6 +287,7 @@
 
 .mcu-notice-success { background: #e7f7ed; color: var(--mcu-success); border: 1px solid #c3e6cb; }
 .mcu-notice-error { background: #fbeaea; color: var(--mcu-danger); border: 1px solid #f5c6cb; }
+.mcu-notice-info { background: #eef5ff; color: #24558f; border: 1px solid #c7dcf7; }
 
 /* Empty State */
 .mcu-empty-state {

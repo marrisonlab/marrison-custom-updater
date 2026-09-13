@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.4
+ * Version: 9.8.5
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.4');
+    define('MCU_PLUGIN_VERSION', '9.8.5');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -78,7 +78,6 @@ class MCU_Custom_Updater {
         add_action('admin_post_marrison_bulk_update', [$this, 'bulk_update']);
         add_action('admin_post_marrison_clear_cache', [$this, 'clear_cache']);
         add_action('admin_post_mcu_clear_update_lock', [$this, 'mcu_clear_update_lock_admin_action']);
-        add_action('admin_post_mcu_save_repo_url', [$this, 'save_repo_url']);
         add_action('admin_post_marrison_force_check_mcu', [$this, 'force_check_mcu']);
         add_filter('mcu_remote_update_plugin', [$this, 'mcu_remote_update_plugin'], 10, 2);
         
@@ -95,6 +94,7 @@ class MCU_Custom_Updater {
         // Cron
         add_filter('cron_schedules', [$this, 'add_custom_cron_intervals']);
         add_action('marrison_scheduled_update_event', [$this, 'run_scheduled_updates'], 10, 1);
+        add_action('init', [$this, 'mcu_repair_missing_automatic_update_schedule'], 20);
         
         // Hook per AJAX
         add_action('wp_ajax_marrison_update_plugin_ajax', [$this, 'update_plugin_ajax']);
@@ -1374,62 +1374,6 @@ echo json_encode($data);
         header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         echo $content;
-        exit;
-    }
-
-    public function save_repo_url() {
-        check_admin_referer('mcu_save_repo_url');
-
-        if (!current_user_can('manage_options')) {
-            wp_die(__('Permessi insufficienti', 'marrison-custom-updater'));
-        }
-
-        if (isset($_POST['marrison_remove_repo_url'])) {
-            delete_option('marrison_repo_url');
-            delete_option('marrison_themes_repo_url'); // Rimuove anche questo per pulizia, o gestire separatamente?
-            // Meglio gestire rimozioni separate se ci sono bottoni separati, ma qui sembra un form unico.
-            // Se l'utente vuole rimuovere solo uno, dovrebbe svuotare il campo.
-            // Il bottone "Rimuovi URL" attuale sembra inteso per resettare tutto o il principale.
-            // Manteniamo il comportamento per il principale, ma aggiungiamo logica per i temi se necessario.
-            // Anzi, miglioriamo: salviamo entrambi se presenti.
-            
-            // Se il bottone premuto è quello generico di rimozione (che era per il plugin repo)
-            delete_option('marrison_repo_url');
-            $redirect_url = admin_url('admin.php?page=marrison-updater-settings&settings-updated=removed');
-        } else {
-            // Salvataggio Plugin Repo
-            if (isset($_POST['marrison_repo_url'])) {
-                $url_input = $_POST['marrison_repo_url'];
-                // Aggiorna solo se l'input non è oscurato (preserviamo l'esistente se l'utente non lo modifica)
-                if ($url_input !== '********************') {
-                    $url = sanitize_url($url_input);
-                    update_option('marrison_repo_url', $url);
-                }
-            }
-
-            // Salvataggio Themes Repo
-            if (isset($_POST['marrison_themes_repo_url'])) {
-                $theme_url_input = $_POST['marrison_themes_repo_url'];
-                // Aggiorna solo se l'input non è oscurato
-                if ($theme_url_input !== '********************') {
-                    $theme_url = sanitize_url($theme_url_input);
-                    update_option('marrison_themes_repo_url', $theme_url);
-                }
-            }
-
-            $redirect_url = admin_url('admin.php?page=marrison-updater-settings&settings-updated=saved' . ($redirect_tab ?? ''));
-        }
-
-        // Pulisce la cache dopo aver modificato l'URL
-        delete_transient('marrison_available_updates');
-        delete_transient('marrison_available_updates_v2');
-        delete_transient('marrison_updates_fetch_failed');
-        delete_site_transient('update_plugins');
-        delete_transient('marrison_available_theme_updates');
-        delete_transient('marrison_theme_updates_fetch_failed');
-        delete_site_transient('update_themes');
-
-        wp_redirect($redirect_url);
         exit;
     }
 

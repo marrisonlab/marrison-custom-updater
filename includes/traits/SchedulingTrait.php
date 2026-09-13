@@ -124,6 +124,38 @@ trait MCU_Scheduling_Trait {
         return wp_schedule_event($target_time->getTimestamp(), $frequency, 'marrison_scheduled_update_event', $args);
     }
 
+    private function mcu_ensure_automatic_update_event_scheduled($context = []) {
+        if (get_option('marrison_auto_update_enabled') !== 'yes') {
+            return false;
+        }
+
+        if ($this->mcu_next_scheduled_update_event_timestamp() > 0) {
+            return false;
+        }
+
+        $frequency = $this->mcu_normalize_auto_update_frequency(get_option('marrison_auto_update_frequency', 'daily'));
+        $time = get_option('marrison_auto_update_time', '00:00');
+        $scheduled = $this->mcu_schedule_automatic_update_event($frequency, $time, time() + 60);
+
+        if (method_exists($this, 'mcu_log_event')) {
+            $this->mcu_log_event($scheduled ? 'info' : 'warning', 'automatic_update_schedule_repaired', [
+                'scheduled' => (bool) $scheduled,
+                'frequency' => $frequency,
+                'time' => $time,
+                'context' => $context,
+                'next_run' => $this->mcu_next_scheduled_update_event_timestamp(),
+            ]);
+        }
+
+        return (bool) $scheduled;
+    }
+
+    public function mcu_repair_missing_automatic_update_schedule() {
+        $this->mcu_ensure_automatic_update_event_scheduled([
+            'context' => 'init',
+        ]);
+    }
+
     private function mcu_reschedule_calendar_update_if_needed($source = '') {
         if ('automatic' !== $source || get_option('marrison_auto_update_enabled') !== 'yes') {
             return;
@@ -649,6 +681,11 @@ trait MCU_Scheduling_Trait {
                 $this->mcu_restore_active_plugin_snapshot($mcu_update_snapshot, ['operation' => 'scheduled_updates', 'context' => 'shutdown']);
                 $this->mcu_release_update_lock($mcu_update_lock);
             }
+
+            $this->mcu_ensure_automatic_update_event_scheduled([
+                'source' => $mcu_shutdown_source,
+                'context' => 'shutdown',
+            ]);
         });
 
         try {
@@ -1359,6 +1396,10 @@ trait MCU_Scheduling_Trait {
                 $this->mcu_log_event('info', 'scheduled_updates_finished', ['status' => $log_entry['status'] ?? 'unknown']);
             }
             $this->mcu_reschedule_calendar_update_if_needed($source);
+            $this->mcu_ensure_automatic_update_event_scheduled([
+                'source' => $source ?: 'cron',
+                'context' => 'finally',
+            ]);
             $mcu_diagnostics_scheduler = '\\MarrisonCustomUpdater\\MaintenanceClient\\Diagnostics_Scheduler';
             if (!class_exists($mcu_diagnostics_scheduler) && defined('MCU_PLUGIN_DIR')) {
                 require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-diagnostics-scheduler.php';

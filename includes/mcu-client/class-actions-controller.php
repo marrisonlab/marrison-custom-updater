@@ -76,6 +76,8 @@ final class Actions_Controller {
 			);
 		}
 
+		Plugin::enforce_repository_access();
+
 		$operation = sanitize_key( (string) $request->get_param( 'operation' ) );
 		if ( '' === $operation ) {
 			$operation = 'unsupported';
@@ -83,6 +85,15 @@ final class Actions_Controller {
 
 		$parameters = $request->get_param( 'parameters' );
 		$parameters = is_array( $parameters ) ? $parameters : array();
+
+		// Keep the local updater cache aligned before running an operation. This
+		// also makes force_sync and queued updates use the new repository URLs.
+		$repository_config = $request->get_param( 'repository_config' );
+		if ( is_array( $repository_config ) && ! empty( $repository_config['revoke'] ) ) {
+			Settings::revoke_repository_config();
+		} else {
+			Settings::sync_repository_config( $repository_config );
+		}
 
 		$result = self::execute( $operation, $parameters, $site_id, $start );
 
@@ -153,6 +164,11 @@ final class Actions_Controller {
 			$payload = self::update_plugin( $parameters );
 		} elseif ( 'update_all' === $operation ) {
 			$payload = self::queue_update();
+		} elseif ( 'revoke_repository_config' === $operation ) {
+			$payload = array(
+				'success' => true,
+				'message' => __( 'Accesso ai repository privati revocato.', 'marrison-custom-updater' ),
+			);
 		} else {
 			$payload = array(
 				'success' => false,
@@ -220,6 +236,14 @@ final class Actions_Controller {
 				'update_all' => array(
 					'type'           => 'write',
 					'cost_class'     => 'deferred',
+					'required'       => array(),
+					'allowed_params' => array(),
+					'timeout'        => 30,
+					'schema_version' => 1,
+				),
+				'revoke_repository_config' => array(
+					'type'           => 'write',
+					'cost_class'     => 'light',
 					'required'       => array(),
 					'allowed_params' => array(),
 					'timeout'        => 30,
@@ -922,6 +946,9 @@ final class Actions_Controller {
 	 */
 	private static function fetch_private_repo_updates( $type = 'plugin' ) {
 		$type              = 'theme' === $type ? 'theme' : 'plugin';
+		if ( ! Settings::repository_config_managed() ) {
+			return array();
+		}
 		$repo_option       = 'theme' === $type ? 'marrison_themes_repo_url' : 'marrison_repo_url';
 		$cache_key         = 'theme' === $type ? 'marrison_available_theme_updates' : 'marrison_available_updates_v2';
 		$failure_key       = 'theme' === $type ? 'marrison_theme_updates_fetch_failed' : 'marrison_updates_fetch_failed';

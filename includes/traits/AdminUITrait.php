@@ -443,33 +443,16 @@ JS
             <?php endif; ?>
             <?php if ($active_tab == 'general'): ?>
                 <div class="mcu-card">
-                    <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
-                        <?php wp_nonce_field('mcu_save_repo_url'); ?>
-                        <input type="hidden" name="action" value="mcu_save_repo_url">
-                        <div class="mcu-card-header">
-                            <h2 class="mcu-card-title"><span class="dashicons dashicons-database"></span> <?php esc_html_e('Impostazioni Repository', 'marrison-custom-updater'); ?></h2>
-                        </div>
-                        <table class="form-table">
-                            <tr>
-                                <th scope="row"><label for="marrison_repo_url"><?php esc_html_e('Indirizzo Repository Plugin', 'marrison-custom-updater'); ?></label></th>
-                                <td>
-                                    <input type="password" id="marrison_repo_url" name="marrison_repo_url" value="<?php echo get_option('marrison_repo_url') ? '********************' : ''; ?>" class="regular-text" style="width: 100%; max-width: 500px;">
-                                    <p class="description"><?php esc_html_e('Inserisci l\'URL del repository personalizzato per i PLUGIN.', 'marrison-custom-updater'); ?></p>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th scope="row"><label for="marrison_themes_repo_url"><?php esc_html_e('Indirizzo Repository Temi', 'marrison-custom-updater'); ?></label></th>
-                                <td>
-                                    <input type="password" id="marrison_themes_repo_url" name="marrison_themes_repo_url" value="<?php echo get_option('marrison_themes_repo_url') ? '********************' : ''; ?>" class="regular-text" style="width: 100%; max-width: 500px;">
-                                    <p class="description"><?php esc_html_e('Inserisci l\'URL del repository personalizzato per i TEMI.', 'marrison-custom-updater'); ?></p>
-                                </td>
-                            </tr>
-                        </table>
-                        <div style="margin-top: 20px; display: flex; gap: 10px;">
-                            <button class="mcu-button mcu-button-primary" type="submit"><?php esc_html_e('Salva Impostazioni', 'marrison-custom-updater'); ?></button>
-                            <button class="mcu-button mcu-button-secondary" type="submit" name="marrison_remove_repo_url" value="1" onclick="return confirm('<?php echo esc_js(__('Sei sicuro di voler rimuovere gli URL?', 'marrison-custom-updater')); ?>');"><?php esc_html_e('Rimuovi URL', 'marrison-custom-updater'); ?></button>
-                        </div>
-                    </form>
+                    <div class="mcu-card-header">
+                        <h2 class="mcu-card-title"><span class="dashicons dashicons-database"></span> <?php esc_html_e('Impostazioni Repository', 'marrison-custom-updater'); ?></h2>
+                    </div>
+                    <div class="mcu-notice mcu-notice-info">
+                        <span class="dashicons dashicons-admin-generic"></span>
+                        <?php esc_html_e('Gli URL dei repository privati sono gestiti centralmente da Marrison Commander. Configurali nelle impostazioni di Commander: questo sito li riceverà tramite il collegamento MCU autenticato.', 'marrison-custom-updater'); ?>
+                    </div>
+                    <p class="description">
+                        <?php esc_html_e('Gli URL locali vengono utilizzati solo dopo una configurazione ricevuta da Commander tramite richiesta autenticata. Un sito non autorizzato non può accedere ai repository privati.', 'marrison-custom-updater'); ?>
+                    </p>
                 </div>
 
                 <?php
@@ -700,6 +683,9 @@ JS
                             </tr>
                         </table>
                         <?php 
+                        if (method_exists($this, 'mcu_ensure_automatic_update_event_scheduled')) {
+                            $this->mcu_ensure_automatic_update_event_scheduled(['context' => 'admin_scheduling_tab']);
+                        }
                         $next_run = $this->mcu_next_scheduled_update_event_timestamp();
                         if ($next_run): 
                             $tz = new DateTimeZone('Europe/Rome');
