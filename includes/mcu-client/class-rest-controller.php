@@ -646,12 +646,20 @@ final class Rest_Controller {
 	private static function next_scheduled_update_run() {
 		$automatic = wp_next_scheduled( 'marrison_scheduled_update_event', array( 'automatic' ) );
 		$legacy    = wp_next_scheduled( 'marrison_scheduled_update_event' );
+		$scheduled = array_filter( array( (int) $automatic, (int) $legacy ) );
 
-		if ( $automatic && $legacy ) {
-			return min( (int) $automatic, (int) $legacy );
+		// wp_next_scheduled() only finds an event when its arguments match exactly.
+		// Include events left by older MCU versions or normalized by cron managers.
+		if ( function_exists( '_get_cron_array' ) ) {
+			$cron = _get_cron_array();
+			foreach ( is_array( $cron ) ? $cron : array() as $timestamp => $hooks ) {
+				if ( isset( $hooks['marrison_scheduled_update_event'] ) ) {
+					$scheduled[] = (int) $timestamp;
+				}
+			}
 		}
 
-		return $automatic ? (int) $automatic : ( $legacy ? (int) $legacy : 0 );
+		return $scheduled ? min( $scheduled ) : 0;
 	}
 
 	/**

@@ -174,11 +174,20 @@ trait MCU_Scheduling_Trait {
         $automatic = wp_next_scheduled('marrison_scheduled_update_event', ['automatic']);
         $legacy = wp_next_scheduled('marrison_scheduled_update_event');
 
-        if ($automatic && $legacy) {
-            return min((int) $automatic, (int) $legacy);
+        // Older MCU releases and a few cron-management plugins may preserve the
+        // event with a different args signature. WordPress requires an exact args
+        // match in wp_next_scheduled(), so inspect the hook itself as a fallback.
+        $scheduled = array_filter([(int) $automatic, (int) $legacy]);
+        if (function_exists('_get_cron_array')) {
+            $cron = _get_cron_array();
+            foreach (is_array($cron) ? $cron : [] as $timestamp => $hooks) {
+                if (isset($hooks['marrison_scheduled_update_event'])) {
+                    $scheduled[] = (int) $timestamp;
+                }
+            }
         }
 
-        return $automatic ? (int) $automatic : ($legacy ? (int) $legacy : 0);
+        return $scheduled ? min($scheduled) : 0;
     }
 
     private function mcu_cron_started_stale_after_seconds() {
