@@ -1,6 +1,10 @@
 <?php
 trait MCU_Scheduling_Trait {
     public function add_custom_cron_intervals($schedules) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return $schedules;
+        }
+
         $schedules['weekly'] = [
             'interval' => 604800, // 7 days
             'display'  => __('Settimanale', 'marrison-custom-updater')
@@ -113,6 +117,10 @@ trait MCU_Scheduling_Trait {
     }
 
     private function mcu_schedule_automatic_update_event($frequency, $time, $from_timestamp = null) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return false;
+        }
+
         $frequency = $this->mcu_normalize_auto_update_frequency($frequency);
         $target_time = $this->mcu_next_automatic_update_datetime($frequency, $time, $from_timestamp);
         $args = ['automatic'];
@@ -125,6 +133,10 @@ trait MCU_Scheduling_Trait {
     }
 
     private function mcu_ensure_automatic_update_event_scheduled($context = []) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return false;
+        }
+
         if (get_option('marrison_auto_update_enabled') !== 'yes') {
             return false;
         }
@@ -157,7 +169,11 @@ trait MCU_Scheduling_Trait {
     }
 
     private function mcu_reschedule_calendar_update_if_needed($source = '') {
-        if ('automatic' !== $source || get_option('marrison_auto_update_enabled') !== 'yes') {
+        if (
+            !\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()
+            || 'automatic' !== $source
+            || get_option('marrison_auto_update_enabled') !== 'yes'
+        ) {
             return;
         }
 
@@ -319,6 +335,12 @@ trait MCU_Scheduling_Trait {
 
         if (!current_user_can('manage_options')) {
             wp_die(esc_html__('Permessi insufficienti.', 'marrison-custom-updater'));
+        }
+
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            $this->mcu_clear_scheduled_update_events();
+            wp_safe_redirect(admin_url('admin.php?page=marrison-updater-settings&tab=client'));
+            exit;
         }
 
         $enabled = isset($_POST['marrison_auto_update_enabled']) ? 'yes' : 'no';
@@ -653,6 +675,11 @@ trait MCU_Scheduling_Trait {
     }
 
     public function run_scheduled_updates($source = '') {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            \MarrisonCustomUpdater\MaintenanceClient\Plugin::stop_scheduled_activity();
+            return;
+        }
+
         $this->mcu_recover_stale_cron_log_if_needed(['source' => $source ?: 'cron', 'before' => 'run_scheduled_updates']);
 
         $log_entry = [

@@ -230,7 +230,6 @@ JS
             'Nessun log disponibile.' => 'No logs available.',
             'Pulisci Log' => 'Clear Logs',
             'Ultima Modifica' => 'Last Modified',
-            'Guida & Download' => 'Guide & Download',
             'Aggiorna' => 'Update',
             'Aggiorna tutto' => 'Update all',
             'Aggiorna Tutti' => 'Update All',
@@ -271,7 +270,6 @@ JS
             'Tema' => 'Theme',
             'Versione' => 'Version',
             'Escludi' => 'Exclude',
-            'Guida all\'uso' => 'How to Use',
             'Strumenti Aggiuntivi' => 'Additional Tools',
             'Aggiorna tutti i temi' => 'Update all themes',
             'Aggiorna tutte le traduzioni' => 'Update all translations',
@@ -375,31 +373,39 @@ JS
     }
 
     public function add_admin_menu() {
+        $commander_connected = \MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed();
+
         add_menu_page(
             'WP Master Updater',
             'WPMU',
             'manage_options',
             'marrison-updater',
-            [$this,'admin_page'],
+            $commander_connected ? [$this, 'admin_page'] : [$this, 'settings_page'],
             'dashicons-update',
             30
         );
-        add_submenu_page(
-            'marrison-updater',
-            __('Aggiornamenti', 'marrison-custom-updater'),
-            __('Aggiornamenti', 'marrison-custom-updater'),
-            'manage_options',
-            'marrison-updater',
-            [$this, 'admin_page']
-        );
-        add_submenu_page(
-            'marrison-updater',
-            __('Backup', 'marrison-custom-updater'),
-            __('Backup', 'marrison-custom-updater'),
-            'manage_options',
-            'marrison-updater-backups',
-            [$this, 'backup_page']
-        );
+
+        if ($commander_connected) {
+            add_submenu_page(
+                'marrison-updater',
+                __('Aggiornamenti', 'marrison-custom-updater'),
+                __('Aggiornamenti', 'marrison-custom-updater'),
+                'manage_options',
+                'marrison-updater',
+                [$this, 'admin_page']
+            );
+        }
+
+        if ($commander_connected) {
+            add_submenu_page(
+                'marrison-updater',
+                __('Backup', 'marrison-custom-updater'),
+                __('Backup', 'marrison-custom-updater'),
+                'manage_options',
+                'marrison-updater-backups',
+                [$this, 'backup_page']
+            );
+        }
         add_submenu_page(
             'marrison-updater',
             __('Impostazioni', 'marrison-custom-updater'),
@@ -412,17 +418,26 @@ JS
 
     public function settings_page() {
         $settingsUpdated = $_GET['settings-updated'] ?? '';
-        $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'general';
+        $commander_connected = \MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed();
+        $requested_tab = isset($_GET['tab']) && is_string($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : '';
+        $active_tab = '' !== $requested_tab ? $requested_tab : ($commander_connected ? 'general' : 'client');
+        $allowed_tabs = $commander_connected ? ['general', 'scheduling', 'client', 'exclusions', 'logs'] : ['client'];
+        if (!in_array($active_tab, $allowed_tabs, true)) {
+            $active_tab = $commander_connected ? 'general' : 'client';
+        }
         ?>
         <div class="mcu-wrap">
             <?php $this->render_header(__('Impostazioni', 'marrison-custom-updater')); ?>
             <h2 class="nav-tab-wrapper" style="margin-bottom: 20px;">
+                <?php if ($commander_connected): ?>
                 <a href="?page=marrison-updater-settings&tab=general" class="nav-tab <?php echo $active_tab == 'general' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Generale', 'marrison-custom-updater'); ?></a>
                 <a href="?page=marrison-updater-settings&tab=scheduling" class="nav-tab <?php echo $active_tab == 'scheduling' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Programmazione', 'marrison-custom-updater'); ?></a>
+                <?php endif; ?>
                 <a href="?page=marrison-updater-settings&tab=client" class="nav-tab <?php echo $active_tab == 'client' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Client', 'marrison-custom-updater'); ?></a>
+                <?php if ($commander_connected): ?>
                 <a href="?page=marrison-updater-settings&tab=exclusions" class="nav-tab <?php echo $active_tab == 'exclusions' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Esclusioni', 'marrison-custom-updater'); ?></a>
                 <a href="?page=marrison-updater-settings&tab=logs" class="nav-tab <?php echo $active_tab == 'logs' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Log', 'marrison-custom-updater'); ?></a>
-                <a href="?page=marrison-updater-settings&tab=howto" class="nav-tab <?php echo $active_tab == 'howto' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Guida & Download', 'marrison-custom-updater'); ?></a>
+                <?php endif; ?>
             </h2>
             <?php if ($settingsUpdated === 'saved'): ?>
                 <div class="mcu-notice mcu-notice-success"><span class="dashicons dashicons-yes"></span> <?php esc_html_e('Impostazioni salvate correttamente.', 'marrison-custom-updater'); ?></div>
@@ -892,43 +907,6 @@ JS
                     <?php endif; ?>
                 </div>
 
-            <?php elseif ($active_tab == 'howto'): ?>
-                <div class="mcu-card">
-                    <div class="mcu-card-header">
-                        <h2 class="mcu-card-title"><span class="dashicons dashicons-book"></span> <?php esc_html_e('Guida all\'uso', 'marrison-custom-updater'); ?></h2>
-                    </div>
-                    <div style="padding: 10px 0;">
-                        <p><?php esc_html_e('Per trasformare una cartella del tuo server in un Repository Privato compatibile con WP Master Updater, segui questi passaggi:', 'marrison-custom-updater'); ?></p>
-                        <h3 style="margin-top: 20px;"><?php esc_html_e('1. Repository Plugin', 'marrison-custom-updater'); ?></h3>
-                        <ol style="margin-left: 20px; list-style: decimal;">
-                            <li><?php echo wp_kses_post(__('Crea una cartella pubblica sul tuo server (es. <code>https://tuosito.com/my-repo/plugins/</code>).', 'marrison-custom-updater')); ?></li>
-                            <li><?php echo wp_kses_post(__('Scarica il file <code>index.php</code> qui sotto.', 'marrison-custom-updater')); ?></li>
-                            <li><?php esc_html_e('Carica il file nella cartella appena creata.', 'marrison-custom-updater'); ?></li>
-                            <li><?php echo wp_kses_post(__('Carica i file <code>.zip</code> dei tuoi plugin nella stessa cartella.', 'marrison-custom-updater')); ?></li>
-                            <li><?php echo wp_kses_post(__('Inserisci l\'URL della cartella (es. <code>https://tuosito.com/my-repo/plugins/</code>) nelle Impostazioni di questo plugin.', 'marrison-custom-updater')); ?></li>
-                        </ol>
-                        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>" style="margin-top: 15px;">
-                            <?php wp_nonce_field('marrison_download_repo_file'); ?>
-                            <input type="hidden" name="action" value="marrison_download_repo_file">
-                            <input type="hidden" name="file_type" value="plugin">
-                            <button type="submit" class="mcu-button mcu-button-primary"><span class="dashicons dashicons-download"></span> <?php esc_html_e('Scarica index.php per Plugin', 'marrison-custom-updater'); ?></button>
-                        </form>
-                        <hr style="margin: 30px 0; border: 0; border-top: 1px solid #eee;">
-                        <h3><?php esc_html_e('2. Repository Temi', 'marrison-custom-updater'); ?></h3>
-                        <ol style="margin-left: 20px; list-style: decimal;">
-                            <li><?php echo wp_kses_post(__('Crea una cartella pubblica sul tuo server (es. <code>https://tuosito.com/my-repo/themes/</code>).', 'marrison-custom-updater')); ?></li>
-                            <li><?php echo wp_kses_post(__('Scarica il file <code>index.php</code> qui sotto (specifico per i temi).', 'marrison-custom-updater')); ?></li>
-                            <li><?php esc_html_e('Carica il file nella cartella appena creata.', 'marrison-custom-updater'); ?></li>
-                            <li><?php echo wp_kses_post(__('Carica i file <code>.zip</code> dei tuoi temi nella stessa cartella.', 'marrison-custom-updater')); ?></li>
-                            <li><?php echo wp_kses_post(__('Inserisci l\'URL della cartella (es. <code>https://tuosito.com/my-repo/themes/</code>) nelle Impostazioni di questo plugin.', 'marrison-custom-updater')); ?></li>
-                        </ol>
-                        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>" style="margin-top: 15px;">
-                            <?php wp_nonce_field('marrison_download_theme_repo_file'); ?>
-                            <input type="hidden" name="action" value="marrison_download_theme_repo_file">
-                            <button type="submit" class="mcu-button mcu-button-primary"><span class="dashicons dashicons-download"></span> <?php esc_html_e('Scarica index.php per Temi', 'marrison-custom-updater'); ?></button>
-                        </form>
-                    </div>
-                </div>
             <?php endif; ?>
         </div>
         <?php
@@ -1143,6 +1121,11 @@ JS
     }
 
     public function backup_page() {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            wp_safe_redirect(admin_url('admin.php?page=marrison-updater-settings&tab=client'));
+            exit;
+        }
+
         $restored = $_GET['restored'] ?? '';
         $this->cleanup_orphan_plugin_backups();
         if (!function_exists('get_plugins')) {
@@ -1467,6 +1450,11 @@ JS
     }
 
     public function admin_page() {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            wp_safe_redirect(admin_url('admin.php?page=marrison-updater-settings&tab=client'));
+            exit;
+        }
+
         $updates     = $this->get_available_updates();
         $theme_updates = $this->get_available_theme_updates();
         $plugins     = get_plugins();

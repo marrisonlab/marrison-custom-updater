@@ -583,7 +583,14 @@ trait MCU_Update_Operations_Trait {
         }
 
         $now = time();
-        if (empty($context['force']) && !empty($existing['heartbeat_at']) && ($now - (int) $existing['heartbeat_at']) < 30) {
+        $stage_changed = false;
+        if (!empty($context['stage'])) {
+            $next_stage = sanitize_key((string) $context['stage']);
+            $stage_changed = $next_stage !== (string) ($existing['stage'] ?? '');
+            $existing['stage'] = $next_stage;
+        }
+
+        if (empty($context['force']) && !$stage_changed && !empty($existing['heartbeat_at']) && ($now - (int) $existing['heartbeat_at']) < 30) {
             return true;
         }
 
@@ -882,6 +889,13 @@ trait MCU_Update_Operations_Trait {
     }
 
     private function mcu_run_update_guard($operation, $context, $callback) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return new WP_Error(
+                'mcu_client_not_authorized',
+                __('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater')
+            );
+        }
+
         $already_locked = $this->mcu_has_local_update_lock();
         $token = $this->mcu_acquire_update_lock($operation, $context);
         if (is_wp_error($token)) {
@@ -1149,20 +1163,29 @@ trait MCU_Update_Operations_Trait {
     }
 
 
+    private function mcu_safe_private_update_slug($slug) {
+        $slug = sanitize_text_field((string) $slug);
+        $slug = preg_replace('/[^A-Za-z0-9._-]/', '', $slug);
+        return substr((string) $slug, 0, 180);
+    }
+
     private function perform_update($slug) {
+        $slug = $this->mcu_safe_private_update_slug($slug);
+
         return $this->mcu_run_update_guard('private_plugin_update', ['slug' => $slug], function() use ($slug) {
         global $wp_filesystem;
         require_once ABSPATH . 'wp-admin/includes/file.php';
         WP_Filesystem();
         if (!$wp_filesystem) return new WP_Error('fs_init_failed', __('Impossibile inizializzare il filesystem.', 'marrison-custom-updater'));
         foreach ($this->get_available_updates() as $update) {
-            if ($update['slug'] !== $slug) continue;
-            $plugin_file = $this->find_plugin_file($slug, $update['name'] ?? '');
-            if ($this->mcu_is_plugin_update_excluded($slug, $plugin_file, $update['name'] ?? '', $update)) {
+            $update_slug = $this->mcu_safe_private_update_slug($update['slug'] ?? '');
+            if ($update_slug !== $slug) continue;
+            $plugin_file = $this->find_plugin_file($update_slug, $update['name'] ?? '');
+            if ($this->mcu_is_plugin_update_excluded($update_slug, $plugin_file, $update['name'] ?? '', $update)) {
                 return new WP_Error('plugin_update_excluded', __('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'));
             }
             $this->mcu_log_event('info', 'private_plugin_download_started', [
-                'slug'        => $slug,
+                'slug'        => $update_slug,
                 'version'     => $update['version'] ?? '',
                 'download_url' => $update['download_url'] ?? '',
             ]);

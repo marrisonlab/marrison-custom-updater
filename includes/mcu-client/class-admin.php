@@ -36,7 +36,11 @@ final class Admin {
 	 * @return void
 	 */
 	public static function enqueue_assets( $hook_suffix ) {
-		if ( false === strpos( (string) $hook_suffix, 'marrison-updater-settings' ) ) {
+		$is_settings_page          = false !== strpos( (string) $hook_suffix, 'marrison-updater-settings' );
+		$is_disconnected_main_page = 'toplevel_page_marrison-updater' === (string) $hook_suffix
+			&& ! Settings::repository_config_managed();
+
+		if ( ! $is_settings_page && ! $is_disconnected_main_page ) {
 			return;
 		}
 
@@ -63,6 +67,23 @@ final class Admin {
 		}
 
 		Settings::ensure_defaults();
+		if ( ! Settings::repository_config_managed() ) {
+			?>
+			<div class="mcu-card mcu-client-card">
+				<div class="mcu-client-actions">
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="mcu-client-inline-form">
+						<?php wp_nonce_field( 'mcu_maintenance_client_download_config' ); ?>
+						<input type="hidden" name="action" value="mcu_maintenance_client_download_config" />
+						<button type="submit" class="mcu-button mcu-button-primary">
+							<span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Scarica configurazione', 'marrison-custom-updater' ); ?>
+						</button>
+					</form>
+				</div>
+			</div>
+			<?php
+			return;
+		}
+
 		$settings              = Settings::ensure_dashboard_access( get_current_user_id() );
 		$endpoint              = rest_url( Rest_Controller::REST_NAMESPACE . Rest_Controller::REST_ROUTE );
 		$dashboard_endpoint    = rest_url( Rest_Controller::REST_NAMESPACE . Dashboard_Access_Controller::REST_ROUTE );

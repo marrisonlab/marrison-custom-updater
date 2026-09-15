@@ -40,11 +40,15 @@ final class Installer {
 	/**
 	 * Deactivate the client module.
 	 *
-	 * Data is intentionally kept until plugin uninstall/removal.
+	 * General plugin data is kept, but Commander authorization and its runtime
+	 * repository cache are revoked so reactivation cannot restart MCU silently.
 	 *
 	 * @return void
 	 */
 	public static function deactivate() {
-		// No recurring task is registered by the client module.
+		// Deactivation must not leave authorization or MCU cron events behind for
+		// a future reactivation. Commander must explicitly authorize the client
+		// again before any update functionality can resume.
+		Settings::revoke_repository_config();
 	}
 }

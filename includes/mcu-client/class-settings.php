@@ -333,12 +333,25 @@ final class Settings {
 	 * @return bool Whether a managed configuration was applied.
 	 */
 	public static function sync_repository_config( $config ) {
-		if ( ! is_array( $config ) || empty( $config['managed'] ) ) {
+		if ( ! is_array( $config ) ) {
+			return false;
+		}
+
+		// Commander sends an explicit empty managed configuration when a site is
+		// removed. Treat it as a revocation, otherwise the old authorization flag
+		// would survive the disconnection and keep the MCU UI and cron alive.
+		$managed = ! empty( $config['managed'] );
+		if ( ! $managed || ! empty( $config['revoke'] ) ) {
+			self::revoke_repository_config();
 			return false;
 		}
 
 		$plugin_url = self::sanitize_repository_url( isset( $config['plugin_url'] ) ? $config['plugin_url'] : '' );
 		$theme_url  = self::sanitize_repository_url( isset( $config['theme_url'] ) ? $config['theme_url'] : '' );
+		if ( '' === $plugin_url && '' === $theme_url ) {
+			self::revoke_repository_config();
+			return false;
+		}
 		$old_plugin = (string) get_option( self::PLUGIN_REPOSITORY_OPTION, '' );
 		$old_theme  = (string) get_option( self::THEME_REPOSITORY_OPTION, '' );
 		$changed    = $old_plugin !== $plugin_url || $old_theme !== $theme_url || ! self::repository_config_managed();
@@ -367,7 +380,17 @@ final class Settings {
 	 */
 	public static function repository_config_managed() {
 		$settings = self::get();
-		return ! empty( $settings['repository_config_managed'] );
+		if ( empty( $settings['repository_config_managed'] ) ) {
+			return false;
+		}
+
+		// Older Commander revoke flows could leave the managed flag set while
+		// clearing both local repository options. Do not expose an authorized
+		// client in that inconsistent state.
+		$plugin_url = trim( (string) get_option( self::PLUGIN_REPOSITORY_OPTION, '' ) );
+		$theme_url  = trim( (string) get_option( self::THEME_REPOSITORY_OPTION, '' ) );
+
+		return '' !== $plugin_url || '' !== $theme_url;
 	}
 
 	/**
@@ -384,6 +407,12 @@ final class Settings {
 		$settings['repository_config_synced_at'] = 0;
 		self::save( $settings );
 		self::clear_repository_caches();
+
+		// Revocation can arrive through the authenticated status endpoint, so do
+		// the cron cleanup here as well as in the normal request guard.
+		if ( class_exists( __NAMESPACE__ . '\\Plugin' ) && method_exists( __NAMESPACE__ . '\\Plugin', 'stop_scheduled_activity' ) ) {
+			Plugin::stop_scheduled_activity();
+		}
 	}
 
 	/**

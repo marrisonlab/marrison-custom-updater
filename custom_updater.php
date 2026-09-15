@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.7
+ * Version: 9.8.12
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.7');
+    define('MCU_PLUGIN_VERSION', '9.8.12');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -237,6 +237,10 @@ class MCU_Custom_Updater {
             wp_die(__('Insufficient permissions', 'marrison-custom-updater'));
         }
 
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            wp_send_json_error(__('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater'));
+        }
+
         $cleared_cron_events = $this->mcu_clear_master_update_cron_events();
         if ($cleared_cron_events > 0) {
             $this->mcu_log_event('info', 'dashboard_public_update_cron_cleared', [
@@ -386,6 +390,10 @@ class MCU_Custom_Updater {
             wp_send_json_error(__('Insufficient permissions', 'marrison-custom-updater'));
         }
 
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            wp_send_json_error(__('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater'));
+        }
+
         // Forza controllo aggiornamenti
         wp_update_plugins();
         $transient = get_site_transient('update_plugins');
@@ -464,6 +472,10 @@ class MCU_Custom_Updater {
 
         if (!current_user_can('manage_options')) {
             wp_send_json_error(__('Insufficient permissions', 'marrison-custom-updater'));
+        }
+
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            wp_send_json_error(__('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater'));
         }
         
         if (empty($file)) {
@@ -603,6 +615,11 @@ class MCU_Custom_Updater {
     }
 
     public function check_for_available_updates() {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            update_option('marrison_available_updates_count', 0);
+            return;
+        }
+
         // Salva il numero di aggiornamenti disponibili in un'opzione per accesso rapido
         $updates = $this->get_available_updates();
         
@@ -672,6 +689,7 @@ class MCU_Custom_Updater {
 
     public function check_for_updates($transient) {
         if (!is_admin()) return $transient;
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return $transient;
         if (!is_object($transient)) $transient = new stdClass();
         
         // Assicurati che le proprietà esistano
@@ -795,6 +813,7 @@ class MCU_Custom_Updater {
 
     public function check_for_theme_updates($transient) {
         if (!is_admin()) return $transient;
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return $transient;
         if (!is_object($transient)) $transient = new stdClass();
         
         if (!isset($transient->response)) $transient->response = [];
@@ -1478,16 +1497,24 @@ echo json_encode($data);
     }
 
     public function mcu_remote_update_plugin($response, $parameters) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return [
+                'success' => false,
+                'error_code' => 'client_not_authorized',
+                'message' => __('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater'),
+            ];
+        }
+
         @ignore_user_abort(true);
         @set_time_limit(0);
 
         $parameters = is_array($parameters) ? $parameters : [];
         $type = sanitize_key((string) ($parameters['type'] ?? ''));
-        $slug = sanitize_key((string) ($parameters['slug'] ?? ''));
+        $slug = $this->mcu_safe_private_update_slug((string) ($parameters['slug'] ?? ''));
         $name = sanitize_text_field((string) ($parameters['name'] ?? ''));
         $new_version = sanitize_text_field((string) ($parameters['new_version'] ?? ''));
         $package = isset($parameters['package']) ? esc_url_raw((string) $parameters['package']) : '';
-        $file = $this->mcu_safe_remote_plugin_file((string) ($parameters['plugin_file'] ?? $parameters['file'] ?? ''));
+        $file = $this->mcu_safe_remote_plugin_file((string) ($parameters['plugin_file'] ?? ''));
 
         include_once ABSPATH . 'wp-admin/includes/plugin.php';
 
@@ -1499,7 +1526,7 @@ echo json_encode($data);
             if ($slug === '.' || $slug === '') {
                 $slug = basename($file, '.php');
             }
-            $slug = sanitize_key($slug);
+            $slug = $this->mcu_safe_private_update_slug($slug);
         }
         if ($file === '' || !file_exists(WP_PLUGIN_DIR . '/' . $file)) {
             return [

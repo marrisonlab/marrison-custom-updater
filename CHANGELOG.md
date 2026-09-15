@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.12] - 2026-09-15
+
+### Added
+- Lo status MCU espone le liste dettagliate `theme_updates` e `translation_updates`, cosi Commander puo mostrare nel Sommario quali temi e traduzioni devono essere aggiornati.
+
+## [9.8.11] - 2026-09-15
+
+### Fixed
+- Il bootstrap MCU carica `Authenticator` e `Debug_Logger` gia in `Plugin::init()`, cosi i job WP-Cron avviati da Commander possono firmare la callback finale senza errore "Class MarrisonCustomUpdater\MaintenanceClient\Authenticator not found".
+
+## [9.8.10] - 2026-09-15
+
+### Changed
+- Rimosso il fallback per slug privati gia normalizzati senza punti e mantenuto solo il match esatto sullo slug MCU canonico.
+- Allineato `/action` al payload strutturato `data`, rimuovendo i campi duplicati top-level usati per compatibilita.
+- Le callback verso Commander inviano l'identificativo job solo dentro `job_status`, senza duplicarlo nel payload principale.
+- Rimossi l'alias remoto `file` per `update_plugin` e gli alias legacy delle operation remote, mantenendo solo i nomi canonici usati da Commander corrente.
+
+## [9.8.9] - 2026-09-15
+
+### Fixed
+- Gli slug degli update privati mantengono i punti nelle risposte a Commander e nelle azioni firmate, evitando errori "Aggiornamento non trovato" su pacchetti versionati come `jupiter-core-v1.1.0`.
+- Il runner degli update privati riconosce anche slug gia normalizzati senza punti da richieste generate con versioni precedenti.
+
+## [9.8.8] - 2026-09-15
+
+### Added
+- Feedback immediato per gli update avviati da Commander: `update_all` conserva `job_id`, `stage`, stato cron e callback firmato opzionale verso Commander alla chiusura del job.
+- Lo stato del lock update espone lo stage corrente, cosi Commander puo distinguere coda, avvio cron, esecuzione e conclusione.
+
+### Changed
+- Gli heartbeat del lock aggiornano subito lo stage anche dentro la finestra di throttle, senza introdurre daemon, agent residenti o polling lato sito client.
+
 ## [9.8.7] - 2026-09-15
 
 ### Fixed

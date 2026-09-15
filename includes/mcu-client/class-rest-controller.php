@@ -115,9 +115,11 @@ final class Rest_Controller {
 		$core_updates        = get_site_transient( 'update_core' );
 		$plugin_update_items = self::plugin_update_items( $plugins, $plugin_updates );
 		$plugin_update_count = count( $plugin_update_items );
-		$theme_update_count  = self::theme_update_count( $theme_updates );
+		$theme_update_items  = self::theme_update_items( $theme_updates );
+		$theme_update_count  = count( $theme_update_items );
 		$core_update_count   = self::core_update_count( $core_updates );
-		$translation_count   = self::translation_update_count( $plugin_updates, $theme_updates, $core_updates );
+		$translation_items   = self::translation_update_items( $plugin_updates, $theme_updates, $core_updates );
+		$translation_count   = count( $translation_items );
 		$mcu_update_count    = self::plugin_update_type_count( $plugin_update_items, 'private' );
 		$total_update_count  = $plugin_update_count + $theme_update_count + $translation_count + $core_update_count;
 		$last_checked        = max(
@@ -164,7 +166,9 @@ final class Rest_Controller {
 			'plugin_updates_count'       => $plugin_update_count,
 			'plugin_updates'             => $plugin_update_items,
 			'theme_updates_count'        => $theme_update_count,
+			'theme_updates'              => $theme_update_items,
 			'translation_updates_count'  => $translation_count,
+			'translation_updates'        => $translation_items,
 			'mcu_private_updates_count'  => $mcu_update_count,
 			'updates_data_fresh'         => $updates_fresh,
 			'updates_may_be_stale'       => ! $updates_fresh,
@@ -206,7 +210,7 @@ final class Rest_Controller {
 		} catch ( \Throwable $exception ) {
 			return array(
 				'supported_read_operations'  => array(),
-				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete', 'debug_log_clear' ),
+				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
 				'snapshot'                   => array(
 					'available' => false,
 					'status'    => 'unavailable',
@@ -346,7 +350,7 @@ final class Rest_Controller {
 					continue;
 				}
 
-				$slug = sanitize_key( (string) $update['slug'] );
+				$slug = self::private_update_slug( (string) $update['slug'] );
 				if ( '' === $slug || self::is_plugin_excluded( $slug ) ) {
 					continue;
 				}
@@ -422,11 +426,23 @@ final class Rest_Controller {
 		return array(
 			'type'            => sanitize_key( $type ),
 			'file'            => sanitize_text_field( $file ),
-			'slug'            => sanitize_key( $slug ),
+			'slug'            => 'private' === sanitize_key( $type ) ? self::private_update_slug( $slug ) : sanitize_key( $slug ),
 			'name'            => sanitize_text_field( '' !== $name ? $name : $slug ),
 			'current_version' => sanitize_text_field( $current ),
 			'new_version'     => sanitize_text_field( $new_version ),
 		);
+	}
+
+	/**
+	 * Preserve private repository slugs such as plugin-v1.2.3.
+	 *
+	 * @param string $slug Repository slug.
+	 * @return string
+	 */
+	private static function private_update_slug( $slug ) {
+		$slug = sanitize_text_field( (string) $slug );
+		$slug = preg_replace( '/[^A-Za-z0-9._-]/', '', $slug );
+		return substr( (string) $slug, 0, 180 );
 	}
 
 	/**
@@ -733,6 +749,107 @@ final class Rest_Controller {
 	}
 
 	/**
+	 * Return public and authorized private theme updates with display metadata.
+	 *
+	 * @param mixed $transient Update transient.
+	 * @return array<int,array<string,string>>
+	 */
+	private static function theme_update_items( $transient ) {
+		$items    = array();
+		$seen     = array();
+		$excluded = get_option( 'marrison_excluded_themes', array() );
+		$excluded = is_array( $excluded ) ? array_map( 'sanitize_key', $excluded ) : array();
+		$themes   = function_exists( 'wp_get_themes' ) ? wp_get_themes() : array();
+
+		if ( is_object( $transient ) && isset( $transient->response ) && is_array( $transient->response ) ) {
+			foreach ( $transient->response as $slug => $update ) {
+				$slug = sanitize_key( (string) $slug );
+				if ( '' === $slug || in_array( $slug, $excluded, true ) || isset( $seen[ $slug ] ) ) {
+					continue;
+				}
+
+				$theme       = isset( $themes[ $slug ] ) ? $themes[ $slug ] : wp_get_theme( $slug );
+				$name        = $theme && $theme->exists() ? (string) $theme->get( 'Name' ) : $slug;
+				$current     = $theme && $theme->exists() ? (string) $theme->get( 'Version' ) : '';
+				$new_version = self::update_value( $update, 'new_version' );
+				$items[]     = self::theme_update_item( 'wordpress_org', $slug, $name, $current, $new_version );
+				$seen[ $slug ] = true;
+			}
+		}
+
+		if ( Settings::repository_config_managed() ) {
+			$private_updates = get_transient( 'marrison_available_theme_updates' );
+			if ( is_array( $private_updates ) ) {
+				foreach ( $private_updates as $update ) {
+					if ( ! is_array( $update ) || empty( $update['slug'] ) || empty( $update['version'] ) ) {
+						continue;
+					}
+
+					$slug = sanitize_key( (string) $update['slug'] );
+					if ( '' === $slug || in_array( $slug, $excluded, true ) || isset( $seen[ $slug ] ) ) {
+						continue;
+					}
+
+					$theme = wp_get_theme( $slug );
+					if ( ! $theme->exists() && ! empty( $update['name'] ) ) {
+						foreach ( $themes as $theme_slug => $theme_object ) {
+							if (
+								strcasecmp( (string) $theme_object->get( 'Name' ), (string) $update['name'] ) === 0
+								|| (string) $theme_object->get( 'TextDomain' ) === $slug
+							) {
+								$theme = $theme_object;
+								$slug  = sanitize_key( (string) $theme_slug );
+								break;
+							}
+						}
+					}
+
+					if (
+						! $theme->exists()
+						|| isset( $seen[ $slug ] )
+						|| ! version_compare( (string) $theme->get( 'Version' ), (string) $update['version'], '<' )
+					) {
+						continue;
+					}
+
+					$name = isset( $update['name'] ) && '' !== (string) $update['name'] ? (string) $update['name'] : (string) $theme->get( 'Name' );
+					$items[] = self::theme_update_item( 'private', $slug, $name, (string) $theme->get( 'Version' ), (string) $update['version'] );
+					$seen[ $slug ] = true;
+				}
+			}
+		}
+
+		usort(
+			$items,
+			static function ( $first, $second ) {
+				return strcasecmp( $first['name'], $second['name'] );
+			}
+		);
+
+		return array_values( $items );
+	}
+
+	/**
+	 * Normalize a theme update item.
+	 *
+	 * @param string $type        Update source.
+	 * @param string $slug        Theme slug.
+	 * @param string $name        Theme name.
+	 * @param string $current     Current version.
+	 * @param string $new_version New version.
+	 * @return array<string,string>
+	 */
+	private static function theme_update_item( $type, $slug, $name, $current, $new_version ) {
+		return array(
+			'type'            => sanitize_key( $type ),
+			'slug'            => sanitize_key( $slug ),
+			'name'            => sanitize_text_field( '' !== $name ? $name : $slug ),
+			'current_version' => sanitize_text_field( $current ),
+			'new_version'     => sanitize_text_field( $new_version ),
+		);
+	}
+
+	/**
 	 * Count update response entries.
 	 *
 	 * @param mixed $transient Update transient.
@@ -844,6 +961,18 @@ final class Rest_Controller {
 	 * @return int
 	 */
 	private static function translation_update_count( $plugin_updates, $theme_updates, $core_updates ) {
+		return count( self::translation_update_items( $plugin_updates, $theme_updates, $core_updates ) );
+	}
+
+	/**
+	 * Return translation updates with display metadata.
+	 *
+	 * @param mixed $plugin_updates Plugin update transient.
+	 * @param mixed $theme_updates Theme update transient.
+	 * @param mixed $core_updates Core update transient.
+	 * @return array<int,array<string,string>>
+	 */
+	private static function translation_update_items( $plugin_updates, $theme_updates, $core_updates ) {
 		$translation_file = ABSPATH . 'wp-admin/includes/translation-install.php';
 		if ( ! function_exists( 'wp_get_translation_updates' ) && file_exists( $translation_file ) ) {
 			require_once $translation_file;
@@ -852,18 +981,68 @@ final class Rest_Controller {
 		if ( function_exists( 'wp_get_translation_updates' ) ) {
 			$updates = wp_get_translation_updates();
 			if ( is_array( $updates ) ) {
-				return count( $updates );
+				return self::normalize_translation_updates( $updates );
 			}
 		}
 
-		$count = 0;
+		$updates = array();
 		foreach ( array( $plugin_updates, $theme_updates, $core_updates ) as $transient ) {
 			if ( is_object( $transient ) && isset( $transient->translations ) && is_array( $transient->translations ) ) {
-				$count += count( $transient->translations );
+				$updates = array_merge( $updates, $transient->translations );
 			}
 		}
 
-		return $count;
+		return self::normalize_translation_updates( $updates );
+	}
+
+	/**
+	 * Normalize translation update records.
+	 *
+	 * @param array<int,mixed> $updates Translation updates.
+	 * @return array<int,array<string,string>>
+	 */
+	private static function normalize_translation_updates( array $updates ) {
+		$items = array();
+		foreach ( $updates as $update ) {
+			$type     = self::update_value( $update, 'type' );
+			$slug     = self::update_value( $update, 'slug' );
+			$language = self::update_value( $update, 'language' );
+			$version  = self::update_value( $update, 'version' );
+
+			$items[] = array(
+				'type'     => sanitize_key( $type ),
+				'slug'     => sanitize_text_field( $slug ),
+				'language' => sanitize_text_field( $language ),
+				'version'  => sanitize_text_field( $version ),
+			);
+		}
+
+		usort(
+			$items,
+			static function ( $first, $second ) {
+				return strcasecmp( $first['type'] . $first['slug'] . $first['language'], $second['type'] . $second['slug'] . $second['language'] );
+			}
+		);
+
+		return array_values( $items );
+	}
+
+	/**
+	 * Read a property from array/object update metadata.
+	 *
+	 * @param mixed  $update Update metadata.
+	 * @param string $key    Property key.
+	 * @return string
+	 */
+	private static function update_value( $update, $key ) {
+		if ( is_array( $update ) && isset( $update[ $key ] ) ) {
+			return sanitize_text_field( (string) $update[ $key ] );
+		}
+		if ( is_object( $update ) && isset( $update->{$key} ) ) {
+			return sanitize_text_field( (string) $update->{$key} );
+		}
+
+		return '';
 	}
 
 	/**

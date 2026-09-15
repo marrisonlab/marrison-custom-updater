@@ -1,6 +1,6 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.7-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.11-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
 [![WordPress Version](https://img.shields.io/badge/WordPress-6.0%2B-green.svg)](https://wordpress.org)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-green.svg)](https://php.net)
 [![License](https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -17,6 +17,7 @@
 - 🌐 **Gestione Traduzioni**: Strumento dedicato per aggiornare le traduzioni dei plugin
 - 📊 **Log e Debug**: Sistema di logging integrato per monitorare le operazioni di aggiornamento e cron job
 - 🛠️ **Debug remoto da Commander**: Attivazione, lettura, download ed eliminazione del debug.log disponibili solo nel pannello Commander
+- 🔁 **Feedback Commander**: `update_all` espone job, stage e callback finale firmato senza agent o daemon residenti sul sito client
 - 🚫 **Esclusione Plugin**: Possibilità di escludere specifici plugin dagli aggiornamenti automatici
 
 ## � Installation
@@ -33,6 +34,27 @@
 - Access to plugin files for backup/restore operations
 
 ## 🔄 Version History
+
+### [9.8.11] - 2026-09-15
+
+- Il bootstrap MCU carica `Authenticator` e `Debug_Logger` gia in `Plugin::init()`, cosi i job WP-Cron avviati da Commander possono firmare la callback finale senza errore "Class MarrisonCustomUpdater\MaintenanceClient\Authenticator not found".
+
+### [9.8.10] - 2026-09-15
+
+- Rimosso il fallback per slug privati gia normalizzati senza punti: gli update usano solo lo slug MCU canonico.
+- Le operation remote usano il payload strutturato `data`; `update_plugin` accetta il campo corrente `plugin_file` e gli alias operation legacy sono stati rimossi.
+- Le callback Commander inviano l'identificativo job solo dentro `job_status`, senza duplicarlo nel payload principale.
+
+### [9.8.9] - 2026-09-15
+
+- Gli slug degli update privati mantengono i punti nelle risposte a Commander e nelle azioni firmate.
+- Il runner riconosce anche slug gia normalizzati senza punti da versioni precedenti, evitando "Aggiornamento non trovato" sui pacchetti privati versionati.
+
+### [9.8.8] - 2026-09-15
+
+- Feedback immediato per gli update avviati da Commander con `job_id`, `stage`, stato cron e callback finale firmato.
+- Lo stage del lock update viene esposto nello status MCU e aggiornato anche durante il throttle degli heartbeat.
+- Nessun daemon, agente residente o listener sempre attivo viene aggiunto ai siti client.
 
 ### [9.8.7] - 2026-09-15
 

@@ -20,6 +20,7 @@ final class Actions_Controller {
 	const CANONICAL_REST_PATH = '/marrison-maintenance/v1/action';
 	const MASTER_UPDATE_HOOK  = 'mcu_master_update_event';
 	const UPDATE_LOCK_KEY     = 'marrison_update_lock';
+	const DEFAULT_CALLBACK_REST_PATH = '/marrison-commander/v1/maintenance-job-callback';
 
 	/**
 	 * Register non-REST hooks.
@@ -89,13 +90,48 @@ final class Actions_Controller {
 		// Keep the local updater cache aligned before running an operation. This
 		// also makes force_sync and queued updates use the new repository URLs.
 		$repository_config = $request->get_param( 'repository_config' );
+		$repository_revoked = false;
 		if ( is_array( $repository_config ) && ! empty( $repository_config['revoke'] ) ) {
 			Settings::revoke_repository_config();
+			$repository_revoked = true;
 		} else {
-			Settings::sync_repository_config( $repository_config );
+			$was_managed       = Settings::repository_config_managed();
+			$synced            = Settings::sync_repository_config( $repository_config );
+			$repository_revoked = $was_managed && is_array( $repository_config ) && ! $synced;
 		}
 
-		$result = self::execute( $operation, $parameters, $site_id, $start );
+		if ( ! Settings::repository_config_managed() && 'revoke_repository_config' !== $operation ) {
+			Plugin::stop_scheduled_activity();
+			// Commander uses force_sync with an empty repository configuration as
+			// the revoke handshake. Confirm that handshake without performing any
+			// update or remote check after authorization has been removed.
+			if ( $repository_revoked && 'force_sync' === $operation ) {
+				$meta   = self::operation_registry()[ $operation ];
+				$result = self::operation_success(
+					$site_id,
+					$operation,
+					$meta,
+					array( 'message' => __( 'Accesso MCU revocato e attività pianificate interrotte.', 'marrison-custom-updater' ) ),
+					$start
+				);
+
+				return rest_ensure_response( $result );
+			}
+
+			return rest_ensure_response(
+				self::operation_error(
+					$site_id,
+					$operation,
+					'write',
+					'client_not_authorized',
+					__( 'Client MCU non autorizzato da Commander.', 'marrison-custom-updater' ),
+					$start
+				)
+			);
+		}
+
+		$master_url = self::safe_callback_url( (string) $request->get_param( 'master_url' ) );
+		$result     = self::execute( $operation, $parameters, $site_id, $start, $master_url );
 
 		Debug_Logger::log(
 			'action_end',
@@ -119,7 +155,7 @@ final class Actions_Controller {
 	 * @param float               $start      Start time.
 	 * @return array<string,mixed>
 	 */
-	private static function execute( $operation, array $parameters, $site_id, $start ) {
+	private static function execute( $operation, array $parameters, $site_id, $start, $master_url = '' ) {
 		$operation = self::canonical_operation( $operation );
 		$registry  = self::operation_registry();
 
@@ -157,7 +193,7 @@ final class Actions_Controller {
 		} elseif ( 'debug_toggle' === $operation ) {
 			require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-manager.php';
 			$payload = Debug_Manager::set_enabled( ! empty( $parameters['enabled'] ) );
-		} elseif ( 'debug_log_delete' === $operation || 'debug_log_clear' === $operation ) {
+		} elseif ( 'debug_log_delete' === $operation ) {
 			require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-manager.php';
 			$payload = Debug_Manager::delete_log();
 		} elseif ( 'force_sync' === $operation ) {
@@ -169,8 +205,10 @@ final class Actions_Controller {
 		} elseif ( 'update_plugin' === $operation ) {
 			$payload = self::update_plugin( $parameters );
 		} elseif ( 'update_all' === $operation ) {
-			$payload = self::queue_update();
+			$payload = self::queue_update( $parameters, $site_id, $master_url );
 		} elseif ( 'revoke_repository_config' === $operation ) {
+			Settings::revoke_repository_config();
+			Plugin::stop_scheduled_activity();
 			$payload = array(
 				'success' => true,
 				'message' => __( 'Accesso ai repository privati revocato.', 'marrison-custom-updater' ),
@@ -194,7 +232,7 @@ final class Actions_Controller {
 			);
 		}
 
-		return self::operation_success( $site_id, $operation, $meta, $payload, $start, $payload );
+		return self::operation_success( $site_id, $operation, $meta, $payload, $start );
 	}
 
 	/**
@@ -243,7 +281,7 @@ final class Actions_Controller {
 					'type'           => 'write',
 					'cost_class'     => 'deferred',
 					'required'       => array(),
-					'allowed_params' => array(),
+					'allowed_params' => array( 'callback_url', 'callback_path' ),
 					'timeout'        => 30,
 					'schema_version' => 1,
 				),
@@ -271,19 +309,11 @@ final class Actions_Controller {
 					'timeout'        => 30,
 					'schema_version' => 1,
 				),
-				'debug_log_clear' => array(
-					'type'           => 'write',
-					'cost_class'     => 'light',
-					'required'       => array(),
-					'allowed_params' => array(),
-					'timeout'        => 30,
-					'schema_version' => 1,
-				),
 				'update_plugin' => array(
 					'type'           => 'write',
 					'cost_class'     => 'moderate',
 					'required'       => array( 'plugin_file' ),
-					'allowed_params' => array( 'plugin_file', 'file', 'slug', 'name', 'type', 'current_version', 'new_version', 'package', 'job_id', 'step', 'total' ),
+					'allowed_params' => array( 'plugin_file', 'slug', 'name', 'type', 'current_version', 'new_version', 'package', 'job_id', 'step', 'total' ),
 					'timeout'        => 300,
 					'schema_version' => 1,
 				),
@@ -301,21 +331,13 @@ final class Actions_Controller {
 	}
 
 	/**
-	 * Normalize operation aliases while preserving old names.
+	 * Normalize operation names.
 	 *
 	 * @param string $operation Raw operation.
 	 * @return string
 	 */
 	private static function canonical_operation( $operation ) {
-		$operation = sanitize_key( (string) $operation );
-		$aliases = array(
-			'cache'                      => 'clear_cache',
-			'force_check'                => 'force_sync',
-			'clear_master_cron'          => 'cancel_master_update',
-			'diagnostics_start_snapshot' => 'diagnostics_schedule_snapshot',
-		);
-
-		return isset( $aliases[ $operation ] ) ? $aliases[ $operation ] : $operation;
+		return sanitize_key( (string) $operation );
 	}
 
 	/**
@@ -326,11 +348,10 @@ final class Actions_Controller {
 	 * @param array<string,mixed> $meta Operation metadata.
 	 * @param array<string,mixed> $data Response data.
 	 * @param float               $start Start time.
-	 * @param array<string,mixed> $compat Top-level compatibility fields.
 	 * @return array<string,mixed>
 	 */
-	private static function operation_success( $site_id, $operation, array $meta, array $data, $start, array $compat = array() ) {
-		$standard = array(
+	private static function operation_success( $site_id, $operation, array $meta, array $data, $start ) {
+		return array(
 			'success'         => true,
 			'site_id'         => sanitize_text_field( (string) $site_id ),
 			'operation'       => sanitize_key( (string) $operation ),
@@ -344,8 +365,6 @@ final class Actions_Controller {
 			'data'            => self::safe_data( $data ),
 			'client_version'  => defined( 'MCU_PLUGIN_VERSION' ) ? MCU_PLUGIN_VERSION : '',
 		);
-
-		return array_merge( $standard, self::safe_data( $compat ) );
 	}
 
 	/**
@@ -357,11 +376,11 @@ final class Actions_Controller {
 	 * @param string              $code Error code.
 	 * @param string              $message Message.
 	 * @param float               $start Start time.
-	 * @param array<string,mixed> $compat Top-level compatibility fields.
+	 * @param array<string,mixed> $data Response data.
 	 * @return array<string,mixed>
 	 */
-	private static function operation_error( $site_id, $operation, $type, $code, $message, $start, array $compat = array() ) {
-		$standard = array(
+	private static function operation_error( $site_id, $operation, $type, $code, $message, $start, array $data = array() ) {
+		return array(
 			'success'        => false,
 			'site_id'        => sanitize_text_field( (string) $site_id ),
 			'operation'      => sanitize_key( (string) $operation ),
@@ -369,10 +388,9 @@ final class Actions_Controller {
 			'error_code'     => sanitize_key( (string) $code ),
 			'message'        => self::safe_text( $message ),
 			'duration_ms'    => self::duration_ms( $start ),
+			'data'           => self::safe_data( $data ),
 			'client_version' => defined( 'MCU_PLUGIN_VERSION' ) ? MCU_PLUGIN_VERSION : '',
 		);
-
-		return array_merge( $standard, self::safe_data( $compat ) );
 	}
 
 	/**
@@ -404,13 +422,89 @@ final class Actions_Controller {
 	}
 
 	/**
+	 * Build the optional Commander callback configuration.
+	 *
+	 * @param array<string,mixed> $parameters Operation parameters.
+	 * @param string              $master_url Authenticated Master URL.
+	 * @return array<string,string>
+	 */
+	private static function callback_config( array $parameters, $master_url = '' ) {
+		$callback_url = self::safe_callback_url( isset( $parameters['callback_url'] ) ? (string) $parameters['callback_url'] : '' );
+		$master_url   = self::safe_callback_url( $master_url );
+		if ( '' === $callback_url || '' === $master_url || ! self::same_callback_origin( $callback_url, $master_url ) ) {
+			return array();
+		}
+
+		$path = self::safe_callback_path( isset( $parameters['callback_path'] ) ? (string) $parameters['callback_path'] : '' );
+
+		return array(
+			'callback_url'  => $callback_url,
+			'callback_path' => $path,
+		);
+	}
+
+	/**
+	 * Sanitize a callback URL supplied by the signed Commander request.
+	 *
+	 * @param string $url Raw URL.
+	 * @return string
+	 */
+	private static function safe_callback_url( $url ) {
+		$url = esc_url_raw( trim( (string) $url ) );
+		if ( '' === $url ) {
+			return '';
+		}
+
+		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
+		$host   = (string) wp_parse_url( $url, PHP_URL_HOST );
+		if ( '' === $host || ! in_array( $scheme, array( 'http', 'https' ), true ) ) {
+			return '';
+		}
+
+		return $url;
+	}
+
+	/**
+	 * Return the canonical Commander callback path used for HMAC signing.
+	 *
+	 * @param string $path Raw path.
+	 * @return string
+	 */
+	private static function safe_callback_path( $path ) {
+		$path = '/' . ltrim( sanitize_text_field( (string) $path ), '/' );
+		return self::DEFAULT_CALLBACK_REST_PATH === $path ? $path : self::DEFAULT_CALLBACK_REST_PATH;
+	}
+
+	/**
+	 * Callback URL must point back to the same origin that made the signed request.
+	 *
+	 * @param string $callback_url Callback URL.
+	 * @param string $master_url   Master URL.
+	 * @return bool
+	 */
+	private static function same_callback_origin( $callback_url, $master_url ) {
+		$callback_scheme = strtolower( (string) wp_parse_url( $callback_url, PHP_URL_SCHEME ) );
+		$master_scheme   = strtolower( (string) wp_parse_url( $master_url, PHP_URL_SCHEME ) );
+		$callback_host   = strtolower( (string) wp_parse_url( $callback_url, PHP_URL_HOST ) );
+		$master_host     = strtolower( (string) wp_parse_url( $master_url, PHP_URL_HOST ) );
+		$callback_port   = (int) wp_parse_url( $callback_url, PHP_URL_PORT );
+		$master_port     = (int) wp_parse_url( $master_url, PHP_URL_PORT );
+
+		return '' !== $callback_host
+			&& $callback_scheme === $master_scheme
+			&& $callback_host === $master_host
+			&& $callback_port === $master_port;
+	}
+
+	/**
 	 * Queue a Master-requested update without running the heavy work in REST.
 	 *
 	 * @return array<string,mixed>
 	 */
-	private static function queue_update() {
+	private static function queue_update( array $parameters = array(), $site_id = '', $master_url = '' ) {
 		$cleared_cron_events = self::clear_master_update_cron_events();
 		$current             = self::current_update_status();
+		$callback            = self::callback_config( $parameters, $master_url );
 		if ( 'running' === ( isset( $current['status'] ) ? $current['status'] : '' ) && ! self::is_stale_status( $current ) ) {
 			$current_status = isset( $current['status'] ) ? (string) $current['status'] : 'queued';
 			$job_id         = isset( $current['job_id'] ) ? (string) $current['job_id'] : '';
@@ -422,7 +516,8 @@ final class Actions_Controller {
 					array(
 						'message'              => $message,
 						'cleared_cron_events'  => $cleared_cron_events,
-					)
+					),
+					$callback
 				)
 			);
 
@@ -434,7 +529,7 @@ final class Actions_Controller {
 				'next_run'            => 0,
 				'cron_spawned'        => false,
 				'cleared_cron_events' => $cleared_cron_events,
-			);
+			) + $callback;
 		}
 
 		self::clear_update_caches();
@@ -443,14 +538,20 @@ final class Actions_Controller {
 		$run_at = time();
 
 		self::save_update_status(
-			array(
-				'job_id'       => $job_id,
-				'status'       => 'queued',
-				'requested_at' => time(),
-				'started_at'   => 0,
-				'finished_at'  => 0,
-				'message'      => __( 'Richiesta aggiornamento ricevuta dal Master.', 'marrison-custom-updater' ),
-				'cleared_cron_events' => $cleared_cron_events,
+			array_merge(
+				array(
+					'job_id'              => $job_id,
+					'site_id'             => sanitize_text_field( (string) $site_id ),
+					'status'              => 'queued',
+					'operation'           => 'update_all',
+					'stage'               => 'queued',
+					'requested_at'        => time(),
+					'started_at'          => 0,
+					'finished_at'         => 0,
+					'message'             => __( 'Richiesta aggiornamento ricevuta dal Master.', 'marrison-custom-updater' ),
+					'cleared_cron_events' => $cleared_cron_events,
+				),
+				$callback
 			)
 		);
 
@@ -460,12 +561,15 @@ final class Actions_Controller {
 				self::save_update_status(
 					array(
 						'job_id'       => $job_id,
+						'site_id'      => sanitize_text_field( (string) $site_id ),
 						'status'       => 'failed',
+						'operation'    => 'update_all',
+						'stage'        => 'schedule_failed',
 						'requested_at' => time(),
 						'started_at'   => 0,
 						'finished_at'  => time(),
 						'message'      => is_wp_error( $scheduled ) ? $scheduled->get_error_message() : __( 'Impossibile accodare il job di aggiornamento.', 'marrison-custom-updater' ),
-					)
+					) + $callback
 				);
 
 				return array(
@@ -485,6 +589,7 @@ final class Actions_Controller {
 				self::current_update_status(),
 				array(
 					'message'             => $message,
+					'stage'               => $cron_spawned ? 'cron_spawned' : 'waiting_wp_cron',
 					'cron_spawned'        => $cron_spawned,
 					'cleared_cron_events' => $cleared_cron_events,
 				)
@@ -495,11 +600,13 @@ final class Actions_Controller {
 			'success'             => true,
 			'message'             => $message,
 			'job_id'              => $job_id,
+			'site_id'             => sanitize_text_field( (string) $site_id ),
 			'status'              => 'queued',
+			'stage'               => $cron_spawned ? 'cron_spawned' : 'waiting_wp_cron',
 			'next_run'            => $run_at,
 			'cron_spawned'        => $cron_spawned,
 			'cleared_cron_events' => $cleared_cron_events,
-		);
+		) + $callback;
 	}
 
 	/**
@@ -701,8 +808,8 @@ final class Actions_Controller {
 			$job_id = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : md5( uniqid( 'mcu-plugin-update', true ) );
 		}
 
-		$plugin_file = self::safe_plugin_file( isset( $parameters['plugin_file'] ) ? (string) $parameters['plugin_file'] : (string) ( $parameters['file'] ?? '' ) );
-		$slug        = sanitize_key( (string) ( $parameters['slug'] ?? '' ) );
+		$plugin_file = self::safe_plugin_file( isset( $parameters['plugin_file'] ) ? (string) $parameters['plugin_file'] : '' );
+		$slug        = self::safe_plugin_slug( (string) ( $parameters['slug'] ?? '' ) );
 		$name        = self::safe_text( (string) ( $parameters['name'] ?? '' ) );
 		$step        = max( 1, (int) ( $parameters['step'] ?? 1 ) );
 		$total       = max( $step, (int) ( $parameters['total'] ?? $step ) );
@@ -802,12 +909,29 @@ final class Actions_Controller {
 	}
 
 	/**
+	 * Preserve private repository slugs such as plugin-v1.2.3.
+	 *
+	 * @param string $slug Raw slug.
+	 * @return string
+	 */
+	private static function safe_plugin_slug( $slug ) {
+		$slug = sanitize_text_field( (string) $slug );
+		$slug = preg_replace( '/[^A-Za-z0-9._-]/', '', $slug );
+		return substr( (string) $slug, 0, 180 );
+	}
+
+	/**
 	 * Execute the queued update through MCU's existing scheduled update flow.
 	 *
 	 * @param string $job_id Queued job identifier.
 	 * @return void
 	 */
 	public static function run_queued_update( $job_id = '' ) {
+		if ( ! Settings::repository_config_managed() ) {
+			Plugin::stop_scheduled_activity();
+			return;
+		}
+
 		$job_id = sanitize_text_field( (string) $job_id );
 		$status = self::current_update_status();
 
@@ -829,6 +953,7 @@ final class Actions_Controller {
 				$status,
 				array(
 					'status'     => 'running',
+					'stage'      => 'started',
 					'started_at' => time(),
 					'message'    => __( 'Aggiornamento in corso.', 'marrison-custom-updater' ),
 				)
@@ -848,29 +973,146 @@ final class Actions_Controller {
 				? sanitize_text_field( (string) $last_log['message'] )
 				: __( 'Aggiornamento completato tramite Master.', 'marrison-custom-updater' );
 
-			self::save_update_status(
-				array_merge(
-					self::current_update_status(),
-					array(
-						'status'      => $finished_status,
-						'finished_at' => time(),
-						'message'     => $message,
-						'last_log'    => is_array( $last_log ) ? $last_log : array(),
-					)
+			$final_status = array_merge(
+				self::current_update_status(),
+				array(
+					'status'      => $finished_status,
+					'stage'       => $finished_status,
+					'finished_at' => time(),
+					'message'     => $message,
+					'last_log'    => is_array( $last_log ) ? $last_log : array(),
 				)
 			);
+			self::save_update_status( $final_status );
+			self::notify_update_callback( $final_status );
 		} catch ( \Throwable $exception ) {
-			self::save_update_status(
-				array_merge(
-					self::current_update_status(),
-					array(
-						'status'      => 'failed',
-						'finished_at' => time(),
-						'message'     => $exception->getMessage(),
-					)
+			$failed_status = array_merge(
+				self::current_update_status(),
+				array(
+					'status'      => 'failed',
+					'stage'       => 'exception',
+					'finished_at' => time(),
+					'message'     => self::safe_text( $exception->getMessage() ),
 				)
 			);
+			self::save_update_status( $failed_status );
+			self::notify_update_callback( $failed_status );
 		}
+	}
+
+	/**
+	 * Notify Commander when a queued update reaches a terminal state.
+	 *
+	 * @param array<string,mixed> $status Update status.
+	 * @return void
+	 */
+	private static function notify_update_callback( array $status ) {
+		$callback_url = self::safe_callback_url( isset( $status['callback_url'] ) ? (string) $status['callback_url'] : '' );
+		if ( '' === $callback_url ) {
+			return;
+		}
+
+		$site_id = sanitize_text_field( (string) ( isset( $status['site_id'] ) ? $status['site_id'] : '' ) );
+		if ( '' === $site_id ) {
+			return;
+		}
+
+		$secret = Settings::get_secret();
+		if ( '' === (string) $secret ) {
+			return;
+		}
+
+		$job_status    = self::callback_job_status( $status );
+		$callback_path = self::safe_callback_path( isset( $status['callback_path'] ) ? (string) $status['callback_path'] : '' );
+		$status_key    = isset( $job_status['status'] ) ? (string) $job_status['status'] : 'failed';
+		$body_data     = array(
+			'site_id'    => $site_id,
+			'client_url' => self::safe_callback_url( home_url( '/' ) ),
+			'client_time' => time(),
+			'protocol_v' => 2,
+			'event'      => 'completed' === $status_key ? 'maintenance.update.completed' : 'maintenance.update.failed',
+			'job_status' => $job_status,
+		);
+		$body          = wp_json_encode( $body_data );
+		if ( ! is_string( $body ) || '' === $body ) {
+			return;
+		}
+
+		$timestamp = (string) time();
+		$nonce     = self::callback_nonce();
+		$signature = hash_hmac(
+			'sha256',
+			Authenticator::canonical_string( 'POST', $callback_path, $timestamp, $nonce, $body ),
+			(string) $secret
+		);
+
+		$response = wp_remote_post(
+			$callback_url,
+			array(
+				'timeout'     => 5,
+				'redirection' => 0,
+				'blocking'    => true,
+				'headers'     => array(
+					'Content-Type'             => 'application/json; charset=utf-8',
+					'X-Marrison-Site-ID'       => $site_id,
+					'X-Marrison-Timestamp'     => $timestamp,
+					'X-Marrison-Nonce'         => $nonce,
+					'X-Marrison-Signature'     => 'sha256=' . $signature,
+				),
+				'body'        => $body,
+			)
+		);
+
+		$response_code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+		$success       = $response_code >= 200 && $response_code < 300;
+		$current = self::current_update_status();
+		if ( empty( $current['job_id'] ) || empty( $status['job_id'] ) || ! hash_equals( (string) $current['job_id'], (string) $status['job_id'] ) ) {
+			return;
+		}
+
+		$callback_state = array(
+			'callback_attempted_at' => time(),
+		);
+		if ( $success ) {
+			$callback_state['callback_sent_at'] = time();
+			$callback_state['callback_error']   = '';
+		} else {
+			$callback_state['callback_error'] = is_wp_error( $response )
+				? self::safe_text( $response->get_error_message() )
+				: 'HTTP ' . $response_code;
+		}
+
+		self::save_update_status( array_merge( $current, $callback_state ) );
+	}
+
+	/**
+	 * Build the public job status sent back to Commander.
+	 *
+	 * @param array<string,mixed> $status Update status.
+	 * @return array<string,mixed>
+	 */
+	private static function callback_job_status( array $status ) {
+		$result = array();
+		foreach ( array( 'job_id', 'site_id', 'operation', 'status', 'stage', 'message' ) as $key ) {
+			$result[ $key ] = self::safe_text( isset( $status[ $key ] ) ? (string) $status[ $key ] : '' );
+		}
+		foreach ( array( 'requested_at', 'started_at', 'finished_at', 'next_run' ) as $key ) {
+			$result[ $key ] = isset( $status[ $key ] ) ? max( 0, (int) $status[ $key ] ) : 0;
+		}
+		foreach ( array( 'cron_spawned', 'stale' ) as $key ) {
+			$result[ $key ] = ! empty( $status[ $key ] );
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Return a nonce for Commander callbacks.
+	 *
+	 * @return string
+	 */
+	private static function callback_nonce() {
+		return function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : md5( uniqid( 'mcu-callback', true ) );
 	}
 
 	/**
@@ -1146,6 +1388,7 @@ final class Actions_Controller {
 		$heartbeat_at  = isset( $lock['heartbeat_at'] ) ? (int) $lock['heartbeat_at'] : 0;
 		$expires_at    = isset( $lock['expires'] ) ? (int) $lock['expires'] : 0;
 		$operation     = isset( $lock['operation'] ) ? sanitize_key( (string) $lock['operation'] ) : '';
+		$stage         = isset( $lock['stage'] ) ? sanitize_key( (string) $lock['stage'] ) : '';
 		$run_id        = isset( $lock['run_id'] ) ? sanitize_text_field( (string) $lock['run_id'] ) : '';
 		$is_expired    = $expires_at <= $now;
 		$is_stale      = self::is_update_lock_stale( $lock );
@@ -1167,6 +1410,7 @@ final class Actions_Controller {
 			return array(
 				'locked'                => false,
 				'operation'             => $operation,
+				'stage'                 => $stage,
 				'started_at'            => isset( $lock['started_at'] ) ? sanitize_text_field( (string) $lock['started_at'] ) : '',
 				'started_at_unix'       => isset( $lock['started_at_unix'] ) ? (int) $lock['started_at_unix'] : 0,
 				'last_activity_at'      => $last_activity,
@@ -1184,6 +1428,7 @@ final class Actions_Controller {
 		return array(
 			'locked'                => true,
 			'operation'             => $operation,
+			'stage'                 => $stage,
 			'started_at'            => isset( $lock['started_at'] ) ? sanitize_text_field( (string) $lock['started_at'] ) : '',
 			'started_at_unix'       => isset( $lock['started_at_unix'] ) ? (int) $lock['started_at_unix'] : 0,
 			'last_activity_at'      => $last_activity,

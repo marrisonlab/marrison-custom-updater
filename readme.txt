@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.7
+Stable tag: 9.8.11
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -25,6 +25,7 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 *   **Aggiornamenti Automatici:** Configura aggiornamenti automatici programmati con giorno del mese dedicato per frequenze mensili e semestrali.
 *   **Gestione Traduzioni:** Strumento dedicato per aggiornare le traduzioni dei plugin.
 *   **Log e Debug:** Sistema di logging integrato per monitorare le operazioni di aggiornamento e cron job.
+*   **Feedback Commander:** Gli update avviati da Commander espongono job, stage e callback finale firmato senza aggiungere agent o daemon residenti.
 *   **Esclusione Plugin:** Possibilità di escludere specifici plugin dagli aggiornamenti automatici.
 
 == Installation ==
@@ -34,6 +35,23 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.11 =
+* **Fix**: Il bootstrap MCU carica `Authenticator` e `Debug_Logger` gia in `Plugin::init()`, cosi i job WP-Cron avviati da Commander possono firmare la callback finale senza errore "Class MarrisonCustomUpdater\MaintenanceClient\Authenticator not found".
+
+= 9.8.10 =
+* **Cambiamento**: Rimosso il fallback per slug privati gia normalizzati senza punti: gli update usano solo lo slug MCU canonico.
+* **Cambiamento**: Le operation remote usano il payload strutturato `data`; `update_plugin` accetta il campo corrente `plugin_file` e gli alias operation legacy sono stati rimossi.
+* **Cambiamento**: Le callback Commander inviano l'identificativo job solo dentro `job_status`, senza duplicarlo nel payload principale.
+
+= 9.8.9 =
+* **Fix**: Gli slug degli update privati mantengono i punti nelle risposte a Commander e nelle azioni firmate.
+* **Fix**: Il runner riconosce anche slug gia normalizzati senza punti da versioni precedenti, evitando "Aggiornamento non trovato" sui pacchetti privati versionati.
+
+= 9.8.8 =
+* **Nuovo**: Feedback immediato per gli update avviati da Commander con `job_id`, `stage`, stato cron e callback finale firmato.
+* **Miglioramento**: Lo stato del lock update espone lo stage corrente e lo aggiorna anche durante il throttle degli heartbeat.
+* **Sicurezza**: Nessun daemon, agente residente o listener sempre attivo viene aggiunto ai siti client.
 
 = 9.8.7 =
 * **Fix**: Le esclusioni plugin vengono rispettate in modo coerente da UI, AJAX, Commander, update ufficiali, update privati e cron schedulati anche quando WordPress usa identificativi diversi per lo stesso plugin.

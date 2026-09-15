@@ -55,6 +55,10 @@ final class Diagnostics_Scheduler {
 	 * @return array<string,mixed>
 	 */
 	public static function maybe_schedule_after_maintenance( array $context = array() ) {
+		if ( ! Settings::repository_config_managed() ) {
+			return array( 'scheduled' => false, 'reason' => 'client_not_authorized' );
+		}
+
 		if ( empty( $context['maintenance_executed'] ) ) {
 			return array( 'scheduled' => false, 'reason' => 'maintenance_not_executed' );
 		}
@@ -113,6 +117,10 @@ final class Diagnostics_Scheduler {
 	 * @return void
 	 */
 	public static function start_snapshot( $snapshot_id ) {
+		if ( ! Settings::repository_config_managed() ) {
+			return;
+		}
+
 		self::load_storage_only();
 		$snapshot_id = Diagnostics_Storage::safe_id( $snapshot_id );
 		$manifest    = Diagnostics_Storage::get_manifest( $snapshot_id );
@@ -151,6 +159,10 @@ final class Diagnostics_Scheduler {
 	 * @return void
 	 */
 	public static function collect_module( $snapshot_id, $module = '' ) {
+		if ( ! Settings::repository_config_managed() ) {
+			return;
+		}
+
 		self::load_runtime();
 		$snapshot_id = Diagnostics_Storage::safe_id( $snapshot_id );
 		$module      = Diagnostics_Storage::safe_module( $module );
@@ -196,6 +208,11 @@ final class Diagnostics_Scheduler {
 
 			$result = Diagnostics_Collector::collect_module( $module );
 			Diagnostics_Storage::save_module( $snapshot_id, $module, $result );
+
+			if ( ! Settings::repository_config_managed() ) {
+				Diagnostics_Storage::clear_pipeline();
+				return;
+			}
 
 			$manifest = Diagnostics_Storage::get_manifest( $snapshot_id );
 			$next     = self::next_pending_module( $manifest );
@@ -297,6 +314,10 @@ final class Diagnostics_Scheduler {
 	 * @return void
 	 */
 	private static function reschedule_start( $snapshot_id, $delay ) {
+		if ( ! Settings::repository_config_managed() ) {
+			return;
+		}
+
 		$snapshot_id = Diagnostics_Storage::safe_id( $snapshot_id );
 		if ( '' === $snapshot_id ) {
 			return;
@@ -322,6 +343,10 @@ final class Diagnostics_Scheduler {
 	 * @return void
 	 */
 	private static function reschedule_collect( $snapshot_id, $module, $delay ) {
+		if ( ! Settings::repository_config_managed() ) {
+			return;
+		}
+
 		$snapshot_id = Diagnostics_Storage::safe_id( $snapshot_id );
 		$module      = Diagnostics_Storage::safe_module( $module );
 		if ( '' === $snapshot_id ) {
