@@ -134,6 +134,7 @@ final class Rest_Controller {
 		$master_update       = class_exists( __NAMESPACE__ . '\\Actions_Controller' ) ? Actions_Controller::current_update_status() : array();
 		$update_lock         = class_exists( __NAMESPACE__ . '\\Actions_Controller' ) ? Actions_Controller::current_update_lock_status() : array( 'locked' => false );
 		$diagnostics         = self::diagnostic_protocol_status();
+		$remote_debug        = class_exists( __NAMESPACE__ . '\\Debug_Manager' ) ? Debug_Manager::status_summary() : array( 'available' => false );
 
 		return array(
 			'success'                    => true,
@@ -180,6 +181,7 @@ final class Rest_Controller {
 			'mcu_backup_summary'         => $backup_summary,
 			'memory_limit'               => ini_get( 'memory_limit' ),
 			'debug_mode'                 => defined( 'WP_DEBUG' ) && WP_DEBUG,
+			'mcu_remote_debug'           => $remote_debug,
 			'environment_type'           => function_exists( 'wp_get_environment_type' ) ? wp_get_environment_type() : 'production',
 		);
 	}
@@ -204,7 +206,7 @@ final class Rest_Controller {
 		} catch ( \Throwable $exception ) {
 			return array(
 				'supported_read_operations'  => array(),
-				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot', 'revoke_repository_config' ),
+				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete', 'debug_log_clear' ),
 				'snapshot'                   => array(
 					'available' => false,
 					'status'    => 'unavailable',

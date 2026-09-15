@@ -1478,12 +1478,10 @@ JS
         $settingsUpdated = $_GET['settings-updated'] ?? '';
         $repo_updates_count = 0;
         foreach($updates as $u) {
-            // Check exclusion
-            if ($this->is_item_excluded($u['slug'], 'plugin')) {
+            $file = $this->find_plugin_file($u['slug'], $u['name'] ?? '');
+            if ($this->mcu_is_plugin_update_excluded($u['slug'], $file, $u['name'] ?? '', $u)) {
                 continue;
             }
-
-            $file = $this->find_plugin_file($u['slug'], $u['name'] ?? '');
             if ($file && isset($plugins[$file]) && version_compare(trim($plugins[$file]['Version']), trim($u['version']), '<')) {
                 $repo_updates_count++;
             }
@@ -1536,8 +1534,9 @@ JS
                 
                 // Also check WordPress.org slug for exclusion
                 $wp_org_slug = isset($data->slug) ? $data->slug : $slug;
+                $plugin_name = isset($plugins[$file]['Name']) ? $plugins[$file]['Name'] : $slug;
                 
-                if ($this->is_item_excluded($slug, 'plugin') || $this->is_item_excluded($wp_org_slug, 'plugin')) continue;
+                if ($this->mcu_is_plugin_update_excluded($wp_org_slug, $file, $plugin_name, $data)) continue;
 
                 if (in_array($file, $private_files_check)) continue;
                 
@@ -1719,7 +1718,7 @@ JS
                                 if ($file && isset($plugins[$file])) {
                                     $data = $plugins[$file];
                                     $slug = $u['slug']; 
-                                    $is_excluded = $this->is_item_excluded($slug, 'plugin');
+                                    $is_excluded = $this->mcu_is_plugin_update_excluded($slug, $file, $u['name'] ?? '', $u);
                                     $has_update = version_compare(trim($data['Version']), trim($u['version']), '<');
                                     if ($has_update && !$is_excluded) $has_repo_updates = true;
                                     $row_style = (!$has_update || $is_excluded) ? 'opacity: 0.6; background: #f9f9f9;' : '';
@@ -1931,7 +1930,8 @@ JS
                                 'current_version' => isset($plugins[$file]['Version']) ? $plugins[$file]['Version'] : '?',
                                 'new_version' => $data->new_version ?? '?',
                                 'is_premium' => true,
-                                'wp_org_slug' => $wp_org_slug
+                                'wp_org_slug' => $wp_org_slug,
+                                'file' => $file,
                             ];
                             continue;
                         }
@@ -1956,7 +1956,8 @@ JS
                             'current_version' => isset($plugins[$file]['Version']) ? $plugins[$file]['Version'] : '?',
                             'new_version' => $data->new_version ?? '?',
                             'is_premium' => false,
-                            'wp_org_slug' => $wp_org_slug
+                            'wp_org_slug' => $wp_org_slug,
+                            'file' => $file,
                         ];
                     }
                 }
@@ -1990,8 +1991,12 @@ JS
                         <tbody>
                             <?php foreach ($plugins_with_auto_update as $slug => $info):
                                 // Check exclusion using both directory slug and WordPress.org slug
-                                $is_excluded = $this->is_item_excluded($slug, 'plugin') || 
-                                             (isset($info['wp_org_slug']) && $this->is_item_excluded($info['wp_org_slug'], 'plugin'));
+                                $is_excluded = $this->mcu_is_plugin_update_excluded(
+                                    $info['wp_org_slug'] ?? $slug,
+                                    $info['file'] ?? '',
+                                    $info['name'] ?? '',
+                                    $info
+                                );
                             ?>
                                 <tr style="<?php echo $is_excluded ? 'opacity: 0.6; background: #f9f9f9;' : ''; ?>">
                                     <td>
@@ -2193,12 +2198,11 @@ JS
         $plugins = get_plugins();
         $private_to_update = [];
         foreach ($private_updates as $u) {
-            // Exclude if toggled off
-            if ($this->is_item_excluded($u['slug'], 'plugin')) {
+            $file = $this->find_plugin_file($u['slug'], $u['name'] ?? '');
+            if ($this->mcu_is_plugin_update_excluded($u['slug'], $file, $u['name'] ?? '', $u)) {
                 continue;
             }
 
-            $file = $this->find_plugin_file($u['slug'], $u['name'] ?? '');
             if ($file && isset($plugins[$file]) && version_compare($plugins[$file]['Version'], $u['version'], '<')) {
                 $private_to_update[] = [
                     'slug' => $u['slug'],
@@ -2225,9 +2229,10 @@ JS
                 if (in_array($file, $private_files)) continue;
                 $slug = isset($data->slug) ? $data->slug : dirname($file);
                 if ($slug === '.') $slug = basename($file, '.php');
+                $plugin_name = isset($plugins[$file]['Name']) ? $plugins[$file]['Name'] : $slug;
                 
                 // Exclude if toggled off
-                if ($this->is_item_excluded($slug, 'plugin')) {
+                if ($this->mcu_is_plugin_update_excluded($slug, $file, $plugin_name, $data)) {
                     continue;
                 }
 
@@ -2294,7 +2299,14 @@ JS
         if (!current_user_can('manage_options')) {
             wp_send_json_error('Insufficient permissions');
         }
+        $cleared_cron_events = $this->mcu_clear_master_update_cron_events();
+        if ($cleared_cron_events > 0) {
+            $this->mcu_log_event('info', 'dashboard_update_all_cron_cleared', [
+                'cleared_cron_events' => $cleared_cron_events,
+            ]);
+        }
         $data = $this->get_all_updates_data();
+        $data['cleared_cron_events'] = $cleared_cron_events;
         wp_send_json_success($data);
     }
 

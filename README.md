@@ -1,6 +1,6 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.5-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.7-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
 [![WordPress Version](https://img.shields.io/badge/WordPress-6.0%2B-green.svg)](https://wordpress.org)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-green.svg)](https://php.net)
 [![License](https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -16,6 +16,7 @@
 - ⏰ **Aggiornamenti Automatici**: Configura aggiornamenti automatici programmati con giorno del mese dedicato per frequenze mensili e semestrali
 - 🌐 **Gestione Traduzioni**: Strumento dedicato per aggiornare le traduzioni dei plugin
 - 📊 **Log e Debug**: Sistema di logging integrato per monitorare le operazioni di aggiornamento e cron job
+- 🛠️ **Debug remoto da Commander**: Attivazione, lettura, download ed eliminazione del debug.log disponibili solo nel pannello Commander
 - 🚫 **Esclusione Plugin**: Possibilità di escludere specifici plugin dagli aggiornamenti automatici
 
 ## � Installation
@@ -32,6 +33,18 @@
 - Access to plugin files for backup/restore operations
 
 ## 🔄 Version History
+
+### [9.8.7] - 2026-09-15
+
+- Matching esclusioni plugin centralizzato tra slug MCU, slug WordPress.org, file, cartella e nome plugin.
+- "Aggiorna tutto" da Commander e dalla dashboard elimina i cron di lavoro Master/Commander residui senza toccare la programmazione automatica.
+- La disattivazione del debug remoto mantiene solo l'ultimo backup di `wp-config.php` ed elimina i backup debug precedenti.
+
+### [9.8.6] - 2026-09-13
+
+- Gestione del debug WordPress da Marrison Commander tramite endpoint MCU firmati e autenticati.
+- Nessuna interfaccia debug o attivita residente aggiunta alle pagine del sito client.
+- Invio manuale del debug.log all'AI disponibile dal pannello Commander.
 
 ### [9.8.5] - 2026-09-08
 

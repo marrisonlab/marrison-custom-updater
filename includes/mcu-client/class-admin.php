@@ -68,7 +68,6 @@ final class Admin {
 		$dashboard_endpoint    = rest_url( Rest_Controller::REST_NAMESPACE . Dashboard_Access_Controller::REST_ROUTE );
 		$last_request          = ! empty( $settings['last_request_at'] ) ? wp_date( 'Y-m-d H:i:s', (int) $settings['last_request_at'] ) : __( 'Mai', 'marrison-custom-updater' );
 		$last_dashboard_access = ! empty( $settings['last_dashboard_access_at'] ) ? wp_date( 'Y-m-d H:i:s', (int) $settings['last_dashboard_access_at'] ) : __( 'Mai', 'marrison-custom-updater' );
-		$debug_enabled         = ! empty( $settings['debug_enabled'] );
 		$dashboard_enabled     = ! empty( $settings['dashboard_access_enabled'] );
 		$dashboard_user        = ! empty( $settings['dashboard_access_user_id'] ) ? get_user_by( 'id', absint( $settings['dashboard_access_user_id'] ) ) : false;
 		$notice_message        = isset( $_GET['mcu_client_notice'] ) ? sanitize_key( wp_unslash( $_GET['mcu_client_notice'] ) ) : '';
@@ -167,17 +166,12 @@ final class Admin {
 
 		<div class="mcu-card mcu-client-card" style="margin-top: 20px;">
 			<div class="mcu-card-header">
-				<h2 class="mcu-card-title"><span class="dashicons dashicons-admin-tools"></span> <?php esc_html_e( 'Debug Client', 'marrison-custom-updater' ); ?></h2>
+				<h2 class="mcu-card-title"><span class="dashicons dashicons-admin-tools"></span> <?php esc_html_e( 'Accesso dashboard', 'marrison-custom-updater' ); ?></h2>
 			</div>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<?php wp_nonce_field( 'mcu_maintenance_client_save_settings' ); ?>
 				<input type="hidden" name="action" value="mcu_maintenance_client_save_settings" />
 				<label class="mcu-client-debug-toggle">
-					<input type="checkbox" name="debug_enabled" value="1" <?php checked( $debug_enabled ); ?> />
-					<?php esc_html_e( 'Abilita log debug limitati', 'marrison-custom-updater' ); ?>
-				</label>
-				<p class="description"><?php esc_html_e( 'Registra inizio richiesta, fine richiesta, durata, codice HTTP e tipo errore. Chiavi, firme, cookie e token non vengono registrati.', 'marrison-custom-updater' ); ?></p>
-				<label class="mcu-client-debug-toggle" style="margin-top: 12px;">
 					<input type="checkbox" name="dashboard_access_enabled" value="1" <?php checked( $dashboard_enabled ); ?> />
 					<?php esc_html_e( 'Abilita accesso one-click dashboard dal Master', 'marrison-custom-updater' ); ?>
 				</label>
@@ -281,7 +275,6 @@ final class Admin {
 		}
 
 		check_admin_referer( 'mcu_maintenance_client_save_settings' );
-		Settings::set_debug_enabled( ! empty( $_POST['debug_enabled'] ) );
 		Settings::set_dashboard_access_enabled( ! empty( $_POST['dashboard_access_enabled'] ), get_current_user_id() );
 
 		wp_safe_redirect( self::settings_url( 'settings_saved' ) );

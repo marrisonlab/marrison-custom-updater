@@ -119,6 +119,10 @@ final class Authenticator {
 	 */
 	private static function canonical_rest_path( \WP_REST_Request $request ) {
 		$route = (string) $request->get_route();
+		if ( class_exists( __NAMESPACE__ . '\\Debug_Log_Controller' ) && false !== strpos( $route, Debug_Log_Controller::CANONICAL_REST_PATH ) ) {
+			return Debug_Log_Controller::CANONICAL_REST_PATH;
+		}
+
 		if ( false !== strpos( $route, Actions_Controller::CANONICAL_REST_PATH ) ) {
 			return Actions_Controller::CANONICAL_REST_PATH;
 		}

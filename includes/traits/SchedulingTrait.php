@@ -847,15 +847,15 @@ trait MCU_Scheduling_Trait {
                     $slug = isset($data_plugin->slug) ? $data_plugin->slug : dirname($file);
                     if ($slug === '.' || $slug === '') $slug = basename($file, '.php');
                     if (in_array($slug, $private_slugs)) continue;
-                    
+                    $plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . $file);
+
                     // Exclude
-                    if ($this->is_item_excluded($slug, 'plugin')) {
+                    if ($this->mcu_is_plugin_update_excluded($slug, $file, $plugin_data['Name'] ?? '', $data_plugin)) {
                         continue;
                     }
 
                     // Check PHP Requirements
                     if (isset($data_plugin->requires_php) && version_compare(phpversion(), $data_plugin->requires_php, '<')) {
-                        $plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . $file);
                         $skipped_updates[] = [
                             'name' => $plugin_data['Name'] ?? $slug,
                             'version' => $data_plugin->new_version,
@@ -865,7 +865,6 @@ trait MCU_Scheduling_Trait {
                     }
 
                     $plugin_files[] = $file;
-                    $plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . $file);
                     
                     $plugin_info_map[$file] = [
                         'name' => $plugin_data['Name'] ?? $slug,

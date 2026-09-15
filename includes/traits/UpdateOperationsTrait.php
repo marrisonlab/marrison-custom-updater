@@ -176,7 +176,99 @@ trait MCU_Update_Operations_Trait {
         $option_name = ($type === 'theme') ? 'marrison_excluded_themes' : 'marrison_excluded_plugins';
         $excluded = get_option($option_name, []);
         if (!is_array($excluded)) $excluded = [];
-        return in_array($slug, $excluded);
+        if ($type !== 'plugin') {
+            return in_array($slug, $excluded, true);
+        }
+
+        return $this->mcu_plugin_candidate_excluded([$slug], $excluded);
+    }
+
+    protected function mcu_is_plugin_update_excluded($slug = '', $file = '', $name = '', $update = null) {
+        $excluded = get_option('marrison_excluded_plugins', []);
+        if (!is_array($excluded) || empty($excluded)) {
+            return false;
+        }
+
+        $candidates = [$slug, $file, $name];
+
+        if ($file !== '') {
+            $normalized_file = str_replace('\\', '/', (string) $file);
+            $dirname = dirname($normalized_file);
+            if ($dirname !== '.' && $dirname !== '') {
+                $candidates[] = $dirname;
+            }
+            $candidates[] = basename($normalized_file, '.php');
+        }
+
+        if (is_object($update)) {
+            foreach (['slug', 'plugin', 'file', 'name'] as $key) {
+                if (!empty($update->{$key})) {
+                    $candidates[] = (string) $update->{$key};
+                }
+            }
+        } elseif (is_array($update)) {
+            foreach (['slug', 'plugin', 'file', 'name'] as $key) {
+                if (!empty($update[$key])) {
+                    $candidates[] = (string) $update[$key];
+                }
+            }
+        }
+
+        return $this->mcu_plugin_candidate_excluded($candidates, $excluded);
+    }
+
+    private function mcu_plugin_candidate_excluded(array $candidates, array $excluded) {
+        $excluded_keys = [];
+        foreach ($excluded as $excluded_identifier) {
+            foreach ($this->mcu_plugin_identifier_keys($excluded_identifier) as $key) {
+                $excluded_keys[$key] = true;
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            foreach ($this->mcu_plugin_identifier_keys($candidate) as $key) {
+                if (isset($excluded_keys[$key])) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function mcu_plugin_identifier_keys($identifier) {
+        $identifier = trim((string) $identifier);
+        if ($identifier === '') {
+            return [];
+        }
+
+        $parts = [$identifier, sanitize_key($identifier), $this->mcu_normalize_plugin_match_key($identifier)];
+        if (strpos($identifier, '/') !== false || strpos($identifier, '\\') !== false) {
+            $normalized = str_replace('\\', '/', $identifier);
+            $dirname = dirname($normalized);
+            if ($dirname !== '.' && $dirname !== '') {
+                $parts[] = $dirname;
+            }
+            $parts[] = basename($normalized, '.php');
+        }
+
+        $keys = [];
+        foreach ($parts as $part) {
+            $part = trim((string) $part);
+            if ($part === '') {
+                continue;
+            }
+            $keys[] = $part;
+            $keys[] = sanitize_key($part);
+            $keys[] = $this->mcu_normalize_plugin_match_key($part);
+        }
+
+        return array_values(array_unique(array_filter($keys)));
+    }
+
+    private function mcu_normalize_plugin_match_key($value) {
+        $normalized = preg_replace('/[^a-z0-9]/', '', strtolower((string) $value));
+        return is_string($normalized) ? $normalized : '';
     }
 
     private function mcu_get_update_run_id() {
@@ -892,15 +984,17 @@ trait MCU_Update_Operations_Trait {
 
         // --- Filter out excluded plugins from ALL updates (including public repo) ---
         if (!empty($transient->response)) {
-            $excluded_plugins = get_option('marrison_excluded_plugins', []);
-            if (!empty($excluded_plugins)) {
-                foreach ($transient->response as $plugin_file => $data) {
-                    $slug = dirname($plugin_file);
-                    if ($slug === '.' || $slug === '') $slug = basename($plugin_file, '.php');
-                    
-                    if (in_array($slug, $excluded_plugins)) {
-                        unset($transient->response[$plugin_file]);
-                    }
+            if (!function_exists('get_plugins')) {
+                require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            }
+            $all_plugins = get_plugins();
+            foreach ($transient->response as $plugin_file => $data) {
+                $slug = dirname($plugin_file);
+                if ($slug === '.' || $slug === '') $slug = basename($plugin_file, '.php');
+                $plugin_name = isset($all_plugins[$plugin_file]['Name']) ? $all_plugins[$plugin_file]['Name'] : '';
+
+                if ($this->mcu_is_plugin_update_excluded($slug, $plugin_file, $plugin_name, $data)) {
+                    unset($transient->response[$plugin_file]);
                 }
             }
         }
@@ -909,12 +1003,11 @@ trait MCU_Update_Operations_Trait {
 
         foreach ($updates as $update) {
             $slug = $update['slug'];
-            
-            if ($this->is_item_excluded($slug, 'plugin')) {
-                continue;
-            }
 
             $plugin_file = $this->find_plugin_file($slug, $update['name'] ?? '');
+            if ($this->mcu_is_plugin_update_excluded($slug, $plugin_file, $update['name'] ?? '', $update)) {
+                continue;
+            }
 
             if ($plugin_file && isset($transient->checked[$plugin_file])) {
                 $current_version = $transient->checked[$plugin_file];
@@ -1064,6 +1157,10 @@ trait MCU_Update_Operations_Trait {
         if (!$wp_filesystem) return new WP_Error('fs_init_failed', __('Impossibile inizializzare il filesystem.', 'marrison-custom-updater'));
         foreach ($this->get_available_updates() as $update) {
             if ($update['slug'] !== $slug) continue;
+            $plugin_file = $this->find_plugin_file($slug, $update['name'] ?? '');
+            if ($this->mcu_is_plugin_update_excluded($slug, $plugin_file, $update['name'] ?? '', $update)) {
+                return new WP_Error('plugin_update_excluded', __('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'));
+            }
             $this->mcu_log_event('info', 'private_plugin_download_started', [
                 'slug'        => $slug,
                 'version'     => $update['version'] ?? '',
@@ -1078,7 +1175,6 @@ trait MCU_Update_Operations_Trait {
                 return $zip;
             }
             $current_version = '';
-            $plugin_file = $this->find_plugin_file($slug, $update['name'] ?? '');
             if ($plugin_file) {
                 if (!function_exists('get_plugins')) {
                     require_once ABSPATH . 'wp-admin/includes/plugin.php';

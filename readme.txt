@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.5
+Stable tag: 9.8.7
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -34,6 +34,16 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.7 =
+* **Fix**: Le esclusioni plugin vengono rispettate in modo coerente da UI, AJAX, Commander, update ufficiali, update privati e cron schedulati anche quando WordPress usa identificativi diversi per lo stesso plugin.
+* **Fix**: "Aggiorna tutto" da Commander e dalla dashboard pulisce eventuali cron `mcu_master_update_event` residui prima di accodare un nuovo job, senza rimuovere la programmazione automatica `marrison_scheduled_update_event`.
+* **Fix**: La disattivazione del debug remoto elimina i vecchi backup `wp-config.php.*-debug-backup-*` e conserva solo la copia piu recente.
+
+= 9.8.6 =
+* **Nuovo**: Gestione del debug WordPress da Marrison Commander con attivazione, disattivazione, lettura, download ed eliminazione del debug.log.
+* **Sicurezza**: Operazioni debug disponibili solo tramite endpoint MCU firmati e autenticati, senza interfaccia o controlli esposti agli utenti del sito client.
+* **Sicurezza**: Nessun daemon, agente residente, cron o polling viene aggiunto al sito client per questa funzione.
 
 = 9.8.5 =
 * **Cambiamento**: Gli URL dei repository privati per plugin e temi vengono gestiti centralmente da Marrison Commander e distribuiti ai client MCU tramite richieste autenticate.

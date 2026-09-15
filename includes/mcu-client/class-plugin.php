@@ -68,12 +68,15 @@ final class Plugin {
 	 * @return void
 	 */
 	public static function register_rest_routes() {
+		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-manager.php';
+		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-log-controller.php';
 		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-logger.php';
 		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-rate-limiter.php';
 		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-authenticator.php';
 
 		Rest_Controller::register_routes();
 		Actions_Controller::register_routes();
+		Debug_Log_Controller::register_routes();
 		Dashboard_Access_Controller::register_routes();
 	}
 }

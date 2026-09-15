@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.5
+ * Version: 9.8.7
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.5');
+    define('MCU_PLUGIN_VERSION', '9.8.7');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -237,12 +237,23 @@ class MCU_Custom_Updater {
             wp_die(__('Insufficient permissions', 'marrison-custom-updater'));
         }
 
+        $cleared_cron_events = $this->mcu_clear_master_update_cron_events();
+        if ($cleared_cron_events > 0) {
+            $this->mcu_log_event('info', 'dashboard_public_update_cron_cleared', [
+                'cleared_cron_events' => $cleared_cron_events,
+            ]);
+        }
+
         // Ottieni tutti i plugin con aggiornamenti automatici attivati
         $auto_update_plugins = (array) get_site_option('auto_update_plugins', []);
         
         // Forza il controllo degli aggiornamenti WordPress
         wp_update_plugins();
         $transient = get_site_transient('update_plugins');
+        if (!function_exists('get_plugins')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        $all_plugins = get_plugins();
         
         if (empty($transient->response)) {
             wp_send_json_error(__('Nessun aggiornamento disponibile', 'marrison-custom-updater'));
@@ -273,6 +284,8 @@ class MCU_Custom_Updater {
 
             // ESCLUDI i plugin privati installati (FILE) o con SLUG noto privato
             if (in_array($file, $private_files)) continue;
+            $plugin_name = isset($all_plugins[$file]['Name']) ? $all_plugins[$file]['Name'] : '';
+            if ($this->mcu_is_plugin_update_excluded($slug, $file, $plugin_name, $data)) continue;
             $check_slugs = [$slug, basename($file, '.php')];
             if (isset($data->slug)) $check_slugs[] = $data->slug;
             $found_private = false;
@@ -419,6 +432,9 @@ class MCU_Custom_Updater {
             if ($found_private) continue;
 
             $plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . $file);
+            if ($this->mcu_is_plugin_update_excluded($slug, $file, $plugin_data['Name'] ?? '', $data)) {
+                continue;
+            }
             
             $plugins_to_update[] = [
                 'file' => $file,
@@ -468,6 +484,10 @@ class MCU_Custom_Updater {
         $current_version = '';
         if (isset($all_plugins[$file])) {
             $current_version = $all_plugins[$file]['Version'];
+        }
+        $plugin_name = isset($all_plugins[$file]['Name']) ? $all_plugins[$file]['Name'] : $plugin_slug;
+        if ($this->mcu_is_plugin_update_excluded($plugin_slug, $file, $plugin_name)) {
+            wp_send_json_error(__('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'));
         }
 
         $lock = $this->mcu_acquire_update_lock('official_plugin_update', [
@@ -593,10 +613,10 @@ class MCU_Custom_Updater {
         $update_count = 0;
         
         foreach ($updates as $u) {
-            if ($this->is_item_excluded($u['slug'], 'plugin')) {
+            $file = $this->find_plugin_file($u['slug'], $u['name'] ?? '');
+            if ($this->mcu_is_plugin_update_excluded($u['slug'], $file, $u['name'] ?? '', $u)) {
                 continue;
             }
-            $file = $this->find_plugin_file($u['slug'], $u['name'] ?? '');
             if ($file && isset($plugins[$file]) && version_compare($plugins[$file]['Version'], $u['version'], '<')) {
                 $update_count++;
             }
@@ -731,12 +751,10 @@ class MCU_Custom_Updater {
 
         // 2. Inietta i NUOVI aggiornamenti dal repository privato (se disponibili)
         foreach ($this->get_available_updates() as $update) {
-            // Check exclusion
-            if ($this->is_item_excluded($update['slug'], 'plugin')) {
+            $file = $this->find_plugin_file($update['slug'], $update['name'] ?? '');
+            if ($this->mcu_is_plugin_update_excluded($update['slug'], $file, $update['name'] ?? '', $update)) {
                 continue;
             }
-
-            $file = $this->find_plugin_file($update['slug'], $update['name'] ?? '');
             if (!$file || !isset($plugins[$file])) continue;
 
             // Rimuovi di nuovo per sicurezza (ridondante ma sicuro)
@@ -1504,6 +1522,20 @@ echo json_encode($data);
         $plugin_name = $name !== '' ? $name : (isset($before['Name']) ? (string) $before['Name'] : $slug);
         $was_active = is_plugin_active($file);
         $was_network_active = is_multisite() && function_exists('is_plugin_active_for_network') && is_plugin_active_for_network($file);
+        if ($this->mcu_is_plugin_update_excluded($slug, $file, $plugin_name, $parameters)) {
+            return [
+                'success' => false,
+                'error_code' => 'plugin_update_excluded',
+                'message' => __('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'),
+                'plugin' => [
+                    'file' => $file,
+                    'slug' => $slug,
+                    'name' => $plugin_name,
+                    'old_version' => $old_version,
+                    'new_version' => $new_version,
+                ],
+            ];
+        }
 
         if ($type === 'private') {
             $result = $this->perform_update($slug);
@@ -1598,6 +1630,10 @@ echo json_encode($data);
                 $plugin_slug = basename($file, '.php');
             }
             $current_version = isset($plugins[$file]['Version']) ? (string) $plugins[$file]['Version'] : '';
+            $plugin_name = isset($plugins[$file]['Name']) ? (string) $plugins[$file]['Name'] : $plugin_slug;
+            if ($this->mcu_is_plugin_update_excluded($plugin_slug, $file, $plugin_name)) {
+                return new WP_Error('plugin_update_excluded', __('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'));
+            }
             $this->create_backup($plugin_slug, $current_version, 'plugin', $file);
 
             $transient = get_site_transient('update_plugins');

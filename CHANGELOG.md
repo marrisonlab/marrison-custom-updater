@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.7] - 2026-09-15
+
+### Fixed
+- Le esclusioni plugin ora vengono rispettate in modo coerente da UI, AJAX, Commander, update ufficiali, update privati e cron schedulati anche quando WordPress usa identificativi diversi per lo stesso plugin.
+- "Aggiorna tutto" da Commander e dalla dashboard pulisce eventuali cron `mcu_master_update_event` residui prima di accodare un nuovo job, senza rimuovere la programmazione automatica `marrison_scheduled_update_event`.
+- La disattivazione del debug remoto elimina i vecchi backup `wp-config.php.*-debug-backup-*` e conserva solo la copia piu recente.
+
+## [9.8.6] - 2026-09-13
+
+### Added
+- Gestione del debug WordPress da Marrison Commander con attivazione, disattivazione, lettura, download ed eliminazione del debug.log.
+- Endpoint MCU firmati e autenticati per le operazioni debug, senza interfaccia o controlli esposti agli utenti del sito client.
+- Invio manuale del debug.log all'AI da Commander, con analisi salvata senza conservare il contenuto del log.
+
+### Security
+- La lettura del log e l'invio all'AI avvengono solo su richiesta esplicita di Commander e usano un limite di dimensione.
+- Nessun daemon, agente residente, cron o polling viene aggiunto al sito client per questa funzione.
+
 ## [9.8.5] - 2026-09-08
 
 ### Changed

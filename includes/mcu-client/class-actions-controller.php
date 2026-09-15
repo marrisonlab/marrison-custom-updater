@@ -154,6 +154,12 @@ final class Actions_Controller {
 				'success' => true,
 				'message' => __( 'Cache cleared.', 'marrison-custom-updater' ),
 			);
+		} elseif ( 'debug_toggle' === $operation ) {
+			require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-manager.php';
+			$payload = Debug_Manager::set_enabled( ! empty( $parameters['enabled'] ) );
+		} elseif ( 'debug_log_delete' === $operation || 'debug_log_clear' === $operation ) {
+			require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-manager.php';
+			$payload = Debug_Manager::delete_log();
 		} elseif ( 'force_sync' === $operation ) {
 			$payload = self::force_update_sync();
 		} elseif ( 'cancel_master_update' === $operation ) {
@@ -242,6 +248,30 @@ final class Actions_Controller {
 					'schema_version' => 1,
 				),
 				'revoke_repository_config' => array(
+					'type'           => 'write',
+					'cost_class'     => 'light',
+					'required'       => array(),
+					'allowed_params' => array(),
+					'timeout'        => 30,
+					'schema_version' => 1,
+				),
+				'debug_toggle' => array(
+					'type'           => 'write',
+					'cost_class'     => 'light',
+					'required'       => array( 'enabled' ),
+					'allowed_params' => array( 'enabled' ),
+					'timeout'        => 30,
+					'schema_version' => 1,
+				),
+				'debug_log_delete' => array(
+					'type'           => 'write',
+					'cost_class'     => 'light',
+					'required'       => array(),
+					'allowed_params' => array(),
+					'timeout'        => 30,
+					'schema_version' => 1,
+				),
+				'debug_log_clear' => array(
 					'type'           => 'write',
 					'cost_class'     => 'light',
 					'required'       => array(),
@@ -379,50 +409,31 @@ final class Actions_Controller {
 	 * @return array<string,mixed>
 	 */
 	private static function queue_update() {
-		$current = self::current_update_status();
-		if ( in_array( isset( $current['status'] ) ? $current['status'] : '', array( 'queued', 'running' ), true ) && ! self::is_stale_status( $current ) ) {
+		$cleared_cron_events = self::clear_master_update_cron_events();
+		$current             = self::current_update_status();
+		if ( 'running' === ( isset( $current['status'] ) ? $current['status'] : '' ) && ! self::is_stale_status( $current ) ) {
 			$current_status = isset( $current['status'] ) ? (string) $current['status'] : 'queued';
 			$job_id         = isset( $current['job_id'] ) ? (string) $current['job_id'] : '';
-			$next_run       = self::next_master_update_run( $job_id );
-			$cron_spawned   = false;
-			$message        = __( 'Aggiornamento gia accodato.', 'marrison-custom-updater' );
-			$can_spawn      = true;
+			$message        = __( 'Aggiornamento gia in esecuzione; cron accodati rimossi.', 'marrison-custom-updater' );
 
-			if ( 'queued' === $current_status && '' !== $job_id ) {
-				if ( ! $next_run ) {
-					$next_run  = time();
-					$scheduled = wp_schedule_single_event( $next_run, self::MASTER_UPDATE_HOOK, array( $job_id ), true );
-					if ( is_wp_error( $scheduled ) || ! $scheduled ) {
-						$message = is_wp_error( $scheduled ) ? $scheduled->get_error_message() : __( 'Impossibile riaccodare il job di aggiornamento.', 'marrison-custom-updater' );
-						$can_spawn = false;
-					}
-				}
-
-				if ( $can_spawn ) {
-					$cron_spawned = self::spawn_queued_update_cron( $next_run ? $next_run : time() );
-					$message      = $cron_spawned
-						? __( 'Aggiornamento gia accodato, cron riavviato.', 'marrison-custom-updater' )
-						: __( 'Aggiornamento gia accodato, in attesa di WP-Cron.', 'marrison-custom-updater' );
-				}
-
-				self::save_update_status(
-					array_merge(
-						$current,
-						array(
-							'message'      => $message,
-							'cron_spawned' => $cron_spawned,
-						)
+			self::save_update_status(
+				array_merge(
+					$current,
+					array(
+						'message'              => $message,
+						'cleared_cron_events'  => $cleared_cron_events,
 					)
-				);
-			}
+				)
+			);
 
 			return array(
-				'success'      => true,
-				'message'      => $message,
-				'job_id'       => $job_id,
-				'status'       => $current_status,
-				'next_run'     => $next_run,
-				'cron_spawned' => $cron_spawned,
+				'success'             => true,
+				'message'             => $message,
+				'job_id'              => $job_id,
+				'status'              => $current_status,
+				'next_run'            => 0,
+				'cron_spawned'        => false,
+				'cleared_cron_events' => $cleared_cron_events,
 			);
 		}
 
@@ -439,6 +450,7 @@ final class Actions_Controller {
 				'started_at'   => 0,
 				'finished_at'  => 0,
 				'message'      => __( 'Richiesta aggiornamento ricevuta dal Master.', 'marrison-custom-updater' ),
+				'cleared_cron_events' => $cleared_cron_events,
 			)
 		);
 
@@ -472,19 +484,21 @@ final class Actions_Controller {
 			array_merge(
 				self::current_update_status(),
 				array(
-					'message'       => $message,
-					'cron_spawned'  => $cron_spawned,
+					'message'             => $message,
+					'cron_spawned'        => $cron_spawned,
+					'cleared_cron_events' => $cleared_cron_events,
 				)
 			)
 		);
 
 		return array(
-			'success'      => true,
-			'message'      => $message,
-			'job_id'       => $job_id,
-			'status'       => 'queued',
-			'next_run'     => $run_at,
-			'cron_spawned' => $cron_spawned,
+			'success'             => true,
+			'message'             => $message,
+			'job_id'              => $job_id,
+			'status'              => 'queued',
+			'next_run'            => $run_at,
+			'cron_spawned'        => $cron_spawned,
+			'cleared_cron_events' => $cleared_cron_events,
 		);
 	}
 
