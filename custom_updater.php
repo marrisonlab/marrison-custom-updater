@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.12
+ * Version: 9.8.13
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.12');
+    define('MCU_PLUGIN_VERSION', '9.8.13');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -568,11 +568,19 @@ class MCU_Custom_Updater {
             $this->mcu_release_update_lock($lock);
             wp_send_json_error($result->get_error_message());
         } elseif (!$result) {
-            $this->mcu_log_event('error', 'official_plugin_update_returned_false', ['file' => $file]);
+            $error_message = $this->mcu_upgrader_failure_message(
+                $skin,
+                $upgrader,
+                __('Aggiornamento plugin fallito: WordPress non ha restituito dettagli tecnici.', 'marrison-custom-updater')
+            );
+            $this->mcu_log_event('error', 'official_plugin_update_returned_false', [
+                'file' => $file,
+                'error_message' => $error_message,
+            ]);
             $this->mcu_flush_update_caches(['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_release_update_lock($lock);
-            wp_send_json_error(__('Update failed', 'marrison-custom-updater'));
+            wp_send_json_error($error_message);
         } else {
             if ($was_active && !is_plugin_active($file)) {
                 // Reactivate silently: do not fire activation hooks in an update context
@@ -1696,7 +1704,14 @@ echo json_encode($data);
                 return $result;
             }
             if (!$result) {
-                return new WP_Error('plugin_update_failed', __('Update failed', 'marrison-custom-updater'));
+                return new WP_Error(
+                    'plugin_update_failed',
+                    $this->mcu_upgrader_failure_message(
+                        $skin,
+                        $upgrader,
+                        __('Aggiornamento plugin fallito: WordPress non ha restituito dettagli tecnici.', 'marrison-custom-updater')
+                    )
+                );
             }
 
             update_option('marrison_last_plugins_update_time', current_time('mysql'));

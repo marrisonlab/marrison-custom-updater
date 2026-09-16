@@ -921,7 +921,11 @@ trait MCU_Scheduling_Trait {
                                 if (is_wp_error($res)) {
                                     $error_msg = $res->get_error_message();
                                 } elseif ($res === false) {
-                                    $error_msg = __('Aggiornamento fallito', 'marrison-custom-updater');
+                                    $error_msg = $this->mcu_upgrader_failure_message(
+                                        $skin,
+                                        $upgrader,
+                                        __('Aggiornamento plugin fallito: WordPress non ha restituito dettagli tecnici.', 'marrison-custom-updater')
+                                    );
                                 }
                                 $failed_updates[] = [
                                     'name' => $info['name'],
@@ -980,7 +984,13 @@ trait MCU_Scheduling_Trait {
                                     'new_version' => $info['new_version']
                                 ];
                             } else {
-                                $error_msg = is_wp_error($res) ? $res->get_error_message() : __('Errore aggiornamento tema', 'marrison-custom-updater');
+                                $error_msg = is_wp_error($res)
+                                    ? $res->get_error_message()
+                                    : $this->mcu_upgrader_failure_message(
+                                        $skin,
+                                        $theme_upgrader,
+                                        __('Aggiornamento tema fallito: WordPress non ha restituito dettagli tecnici.', 'marrison-custom-updater')
+                                    );
                                 $failed_updates[] = [
                                     'name' => $info['name'],
                                     'version' => $info['new_version'],

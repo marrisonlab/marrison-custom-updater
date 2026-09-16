@@ -28,6 +28,7 @@ final class Actions_Controller {
 	 * @return void
 	 */
 	public static function init() {
+		self::ensure_runtime_dependencies();
 		add_action( self::MASTER_UPDATE_HOOK, array( __CLASS__, 'run_queued_update' ), 10, 1 );
 	}
 
@@ -56,6 +57,8 @@ final class Actions_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public static function run_action( \WP_REST_Request $request ) {
+		self::ensure_runtime_dependencies();
+
 		$start   = microtime( true );
 		$site_id = (string) $request->get_header( 'x-marrison-site-id' );
 		Debug_Logger::log( 'action_start', array( 'site_id' => $site_id ) );
@@ -869,6 +872,8 @@ final class Actions_Controller {
 					'status'      => $success ? 'completed' : 'failed',
 					'finished_at' => time(),
 					'message'     => $message,
+					'error_code'  => $success ? '' : self::safe_text( isset( $result['error_code'] ) ? (string) $result['error_code'] : 'plugin_update_failed' ),
+					'plugin'      => isset( $result['plugin'] ) && is_array( $result['plugin'] ) ? self::safe_data( $result['plugin'] ) : array(),
 					'last_result' => $result,
 				)
 			)
@@ -927,6 +932,8 @@ final class Actions_Controller {
 	 * @return void
 	 */
 	public static function run_queued_update( $job_id = '' ) {
+		self::ensure_runtime_dependencies();
+
 		if ( ! Settings::repository_config_managed() ) {
 			Plugin::stop_scheduled_activity();
 			return;
@@ -1007,6 +1014,8 @@ final class Actions_Controller {
 	 * @return void
 	 */
 	private static function notify_update_callback( array $status ) {
+		self::ensure_runtime_dependencies();
+
 		$callback_url = self::safe_callback_url( isset( $status['callback_url'] ) ? (string) $status['callback_url'] : '' );
 		if ( '' === $callback_url ) {
 			return;
@@ -1086,12 +1095,25 @@ final class Actions_Controller {
 	}
 
 	/**
+	 * Load classes needed by both REST requests and WP-Cron callbacks.
+	 *
+	 * @return void
+	 */
+	private static function ensure_runtime_dependencies() {
+		if ( defined( 'MCU_PLUGIN_DIR' ) ) {
+			require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-logger.php';
+			require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-authenticator.php';
+		}
+	}
+
+	/**
 	 * Build the public job status sent back to Commander.
 	 *
 	 * @param array<string,mixed> $status Update status.
 	 * @return array<string,mixed>
 	 */
 	private static function callback_job_status( array $status ) {
+		$status = self::enrich_update_status_message( $status );
 		$result = array();
 		foreach ( array( 'job_id', 'site_id', 'operation', 'status', 'stage', 'message' ) as $key ) {
 			$result[ $key ] = self::safe_text( isset( $status[ $key ] ) ? (string) $status[ $key ] : '' );
@@ -1103,7 +1125,428 @@ final class Actions_Controller {
 			$result[ $key ] = ! empty( $status[ $key ] );
 		}
 
+		if ( ! empty( $status['error_code'] ) ) {
+			$result['error_code'] = self::safe_text( (string) $status['error_code'] );
+		} elseif ( ! empty( $status['last_result'] ) && is_array( $status['last_result'] ) && ! empty( $status['last_result']['error_code'] ) ) {
+			$result['error_code'] = self::safe_text( (string) $status['last_result']['error_code'] );
+		}
+
+		if ( ! empty( $status['plugin'] ) && is_array( $status['plugin'] ) ) {
+			$result['plugin'] = self::safe_data( $status['plugin'] );
+		} elseif ( ! empty( $status['last_result'] ) && is_array( $status['last_result'] ) && ! empty( $status['last_result']['plugin'] ) && is_array( $status['last_result']['plugin'] ) ) {
+			$result['plugin'] = self::safe_data( $status['last_result']['plugin'] );
+		}
+
+		if ( ! empty( $status['last_result'] ) && is_array( $status['last_result'] ) ) {
+			$result['last_result'] = self::safe_data( $status['last_result'] );
+		}
+
+		if ( ! empty( $status['last_log'] ) && is_array( $status['last_log'] ) ) {
+			foreach ( array( 'failed_updates', 'skipped_updates' ) as $key ) {
+				if ( ! empty( $status['last_log'][ $key ] ) && is_array( $status['last_log'][ $key ] ) ) {
+					$result[ $key ] = self::safe_data( $status['last_log'][ $key ] );
+				}
+			}
+		}
+
 		return $result;
+	}
+
+	/**
+	 * Replace generic failed messages with the best diagnostic detail still available locally.
+	 *
+	 * @param array<string,mixed> $status Update status.
+	 * @return array<string,mixed>
+	 */
+	private static function enrich_update_status_message( array $status ) {
+		$message = isset( $status['message'] ) ? (string) $status['message'] : '';
+		if ( ! self::is_generic_update_failure_message( $message ) ) {
+			return $status;
+		}
+
+		$detail = self::update_failure_detail_from_status( $status );
+		if ( '' === $detail ) {
+			return $status;
+		}
+
+		if ( empty( $status['original_message'] ) ) {
+			$status['original_message'] = self::safe_text( $message );
+		}
+		$status['message']             = $detail;
+		$status['message_enriched']    = true;
+		$status['message_enriched_at'] = time();
+
+		return $status;
+	}
+
+	/**
+	 * Is this message too generic to be useful for operators?
+	 *
+	 * @param string $message Message.
+	 * @return bool
+	 */
+	private static function is_generic_update_failure_message( $message ) {
+		$message = trim( wp_strip_all_tags( (string) $message ) );
+		if ( '' === $message ) {
+			return true;
+		}
+
+		$lower = function_exists( 'mb_strtolower' ) ? mb_strtolower( $message, 'UTF-8' ) : strtolower( $message );
+		$lower = trim( preg_replace( '/[\s\.\!\?]+$/', '', $lower ) );
+
+		return in_array(
+			$lower,
+			array(
+				'aggiornamento fallito',
+				'update failed',
+				'aggiornamento plugin fallito',
+				'aggiornamento plugin non completato',
+				'operation failed',
+				'plugin update failed',
+				'aggiornamento fallito: wordpress non ha restituito dettagli tecnici',
+				'aggiornamento plugin fallito: wordpress non ha restituito dettagli tecnici',
+			),
+			true
+		);
+	}
+
+	/**
+	 * Find a useful failure detail in status, cron log, or update log files.
+	 *
+	 * @param array<string,mixed> $status Update status.
+	 * @return string
+	 */
+	private static function update_failure_detail_from_status( array $status ) {
+		if ( ! empty( $status['last_result'] ) && is_array( $status['last_result'] ) ) {
+			$detail = self::failure_text_from_value( $status['last_result'] );
+			if ( '' !== $detail ) {
+				return $detail;
+			}
+		}
+
+		if ( ! empty( $status['last_log'] ) && is_array( $status['last_log'] ) ) {
+			$detail = self::failure_text_from_cron_log( $status['last_log'] );
+			if ( '' !== $detail ) {
+				return $detail;
+			}
+		}
+
+		$last_log = get_option( 'marrison_last_cron_log', array() );
+		if ( is_array( $last_log ) ) {
+			$detail = self::failure_text_from_cron_log( $last_log );
+			if ( '' !== $detail ) {
+				return $detail;
+			}
+		}
+
+		$detail = self::failure_text_from_update_logs( $status );
+		if ( '' !== $detail ) {
+			return $detail;
+		}
+
+		$error_code = isset( $status['error_code'] ) ? sanitize_key( (string) $status['error_code'] ) : '';
+		if ( '' === $error_code && ! empty( $status['last_result'] ) && is_array( $status['last_result'] ) && ! empty( $status['last_result']['error_code'] ) ) {
+			$error_code = sanitize_key( (string) $status['last_result']['error_code'] );
+		}
+
+		if ( '' !== $error_code ) {
+			return sprintf(
+				/* translators: %s: error code. */
+				__( 'Aggiornamento fallito. Codice errore: %s.', 'marrison-custom-updater' ),
+				$error_code
+			);
+		}
+
+		return '';
+	}
+
+	/**
+	 * Extract a detail from the scheduled update log payload.
+	 *
+	 * @param array<string,mixed> $log Cron log.
+	 * @return string
+	 */
+	private static function failure_text_from_cron_log( array $log ) {
+		foreach ( array( 'failed_updates', 'skipped_updates' ) as $key ) {
+			if ( empty( $log[ $key ] ) || ! is_array( $log[ $key ] ) ) {
+				continue;
+			}
+
+			foreach ( $log[ $key ] as $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+
+				$text = self::format_failed_update_item( $item );
+				if ( '' !== $text ) {
+					return $text;
+				}
+			}
+		}
+
+		if ( ! empty( $log['message'] ) ) {
+			$message = self::diagnostic_text( $log['message'], 'message' );
+			if ( '' !== $message ) {
+				return $message;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Format a failed update item for public status.
+	 *
+	 * @param array<string,mixed> $item Failed update item.
+	 * @return string
+	 */
+	private static function format_failed_update_item( array $item ) {
+		$error = '';
+		foreach ( array( 'error', 'reason', 'message', 'last_error' ) as $key ) {
+			if ( ! empty( $item[ $key ] ) ) {
+				$error = self::failure_text_from_value( $item[ $key ], 0, $key );
+				if ( '' !== $error ) {
+					break;
+				}
+			}
+		}
+
+		if ( '' === $error ) {
+			return '';
+		}
+
+		$name = ! empty( $item['name'] ) ? self::safe_text( (string) $item['name'] ) : '';
+		$type = ! empty( $item['type'] ) ? self::safe_text( (string) $item['type'] ) : '';
+		$label = trim( implode( ' ', array_filter( array( $type, $name ) ) ) );
+
+		return '' !== $label ? $label . ': ' . $error : $error;
+	}
+
+	/**
+	 * Search recent JSON update logs for a nearby failure reason.
+	 *
+	 * @param array<string,mixed> $status Update status.
+	 * @return string
+	 */
+	private static function failure_text_from_update_logs( array $status ) {
+		if ( ! defined( 'WP_CONTENT_DIR' ) ) {
+			return '';
+		}
+
+		$dir = WP_CONTENT_DIR . '/marrison-updater-logs';
+		if ( ! is_dir( $dir ) ) {
+			return '';
+		}
+
+		$files = glob( $dir . '/mcu-update-*.log' );
+		if ( ! is_array( $files ) || empty( $files ) ) {
+			return '';
+		}
+
+		usort(
+			$files,
+			function( $a, $b ) {
+				return filemtime( $b ) - filemtime( $a );
+			}
+		);
+
+		foreach ( array_slice( $files, 0, 3 ) as $file ) {
+			$lines = self::recent_update_log_lines( $file );
+			for ( $i = count( $lines ) - 1; $i >= 0; $i-- ) {
+				$entry = json_decode( $lines[ $i ], true );
+				if ( ! is_array( $entry ) || ! self::update_log_entry_matches_status( $entry, $status ) ) {
+					continue;
+				}
+
+				$level = isset( $entry['level'] ) ? sanitize_key( (string) $entry['level'] ) : '';
+				$event = isset( $entry['event'] ) ? sanitize_key( (string) $entry['event'] ) : '';
+				if ( ! in_array( $level, array( 'error', 'warning' ), true ) && false === strpos( $event, 'failed' ) && false === strpos( $event, 'returned_false' ) ) {
+					continue;
+				}
+
+				$detail = self::failure_text_from_value( isset( $entry['context'] ) ? $entry['context'] : $entry );
+				if ( '' !== $detail ) {
+					return $detail;
+				}
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Read the tail of an update log file without loading large logs fully.
+	 *
+	 * @param string $file Log file.
+	 * @return array<int,string>
+	 */
+	private static function recent_update_log_lines( $file ) {
+		if ( ! is_readable( $file ) ) {
+			return array();
+		}
+
+		$size = filesize( $file );
+		if ( ! $size ) {
+			return array();
+		}
+
+		$handle = fopen( $file, 'rb' );
+		if ( ! $handle ) {
+			return array();
+		}
+
+		$read_bytes = min( (int) $size, 262144 );
+		if ( $size > $read_bytes ) {
+			fseek( $handle, -$read_bytes, SEEK_END );
+		}
+		$contents = stream_get_contents( $handle );
+		fclose( $handle );
+
+		if ( ! is_string( $contents ) || '' === $contents ) {
+			return array();
+		}
+
+		$lines = preg_split( '/\r\n|\r|\n/', trim( $contents ) );
+		if ( ! is_array( $lines ) ) {
+			return array();
+		}
+
+		return array_slice( array_values( array_filter( $lines ) ), -200 );
+	}
+
+	/**
+	 * Keep log fallback near the affected job time when possible.
+	 *
+	 * @param array<string,mixed> $entry Log entry.
+	 * @param array<string,mixed> $status Update status.
+	 * @return bool
+	 */
+	private static function update_log_entry_matches_status( array $entry, array $status ) {
+		$target = 0;
+		foreach ( array( 'finished_at', 'started_at', 'requested_at' ) as $key ) {
+			if ( ! empty( $status[ $key ] ) ) {
+				$target = (int) $status[ $key ];
+				break;
+			}
+		}
+
+		if ( $target <= 0 || empty( $entry['time'] ) ) {
+			return true;
+		}
+
+		$entry_time = strtotime( (string) $entry['time'] );
+		if ( ! $entry_time ) {
+			return true;
+		}
+
+		$window = defined( 'DAY_IN_SECONDS' ) ? 2 * DAY_IN_SECONDS : 172800;
+		return abs( $entry_time - $target ) <= $window;
+	}
+
+	/**
+	 * Recursively extract a diagnostic text value.
+	 *
+	 * @param mixed  $value Value.
+	 * @param int    $depth Current recursion depth.
+	 * @param string $field Field name.
+	 * @return string
+	 */
+	private static function failure_text_from_value( $value, $depth = 0, $field = '' ) {
+		if ( $depth > 4 || null === $value || false === $value ) {
+			return '';
+		}
+
+		if ( is_wp_error( $value ) ) {
+			return self::diagnostic_text( $value->get_error_message(), 'error_message' );
+		}
+
+		if ( is_scalar( $value ) ) {
+			return self::diagnostic_text( (string) $value, $field );
+		}
+
+		if ( is_object( $value ) ) {
+			$value = get_object_vars( $value );
+		}
+
+		if ( ! is_array( $value ) ) {
+			return '';
+		}
+
+		foreach ( array( 'error_message', 'error', 'message', 'reason', 'last_error' ) as $key ) {
+			if ( array_key_exists( $key, $value ) ) {
+				$text = self::failure_text_from_value( $value[ $key ], $depth + 1, $key );
+				if ( '' !== $text ) {
+					return $text;
+				}
+			}
+		}
+
+		foreach ( $value as $key => $item ) {
+			$text = self::failure_text_from_value( $item, $depth + 1, is_string( $key ) ? $key : '' );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Sanitize and accept only messages that look like actual diagnostics.
+	 *
+	 * @param string $text Text.
+	 * @param string $field Source field.
+	 * @return string
+	 */
+	private static function diagnostic_text( $text, $field = '' ) {
+		$text = trim( wp_strip_all_tags( (string) $text ) );
+		if ( '' === $text || self::is_generic_update_failure_message( $text ) ) {
+			return '';
+		}
+
+		$lower = function_exists( 'mb_strtolower' ) ? mb_strtolower( $text, 'UTF-8' ) : strtolower( $text );
+		$field = strtolower( (string) $field );
+		$looks_like_error_field = (bool) preg_match( '/error|reason|failed|failure/i', $field );
+		$keywords = array(
+			'error',
+			'errore',
+			'failed',
+			'failure',
+			'fallito',
+			'fallita',
+			'impossibile',
+			'unable',
+			'could not',
+			'not found',
+			'non trovato',
+			'non trovata',
+			'non disponibile',
+			'forbidden',
+			'unauthorized',
+			'invalid',
+			'non valid',
+			'blocc',
+			'richiede',
+			'requires',
+			'scadut',
+			'interrott',
+			'exception',
+			'eccezione',
+			'download',
+			'pclzip',
+			'curl',
+			'filesystem',
+			'permess',
+			'timeout',
+		);
+
+		foreach ( $keywords as $keyword ) {
+			if ( false !== strpos( $lower, $keyword ) ) {
+				return self::safe_text( $text );
+			}
+		}
+
+		return $looks_like_error_field ? self::safe_text( $text ) : '';
 	}
 
 	/**
@@ -1364,6 +1807,12 @@ final class Actions_Controller {
 					'stale'       => true,
 				)
 			);
+			self::save_update_status( $status );
+		}
+
+		$enriched = self::enrich_update_status_message( $status );
+		if ( $enriched !== $status ) {
+			$status = $enriched;
 			self::save_update_status( $status );
 		}
 

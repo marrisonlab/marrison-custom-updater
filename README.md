@@ -1,6 +1,6 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.11-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.13-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
 [![WordPress Version](https://img.shields.io/badge/WordPress-6.0%2B-green.svg)](https://wordpress.org)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-green.svg)](https://php.net)
 [![License](https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -34,6 +34,14 @@
 - Access to plugin files for backup/restore operations
 
 ## 🔄 Version History
+
+### [9.8.13] - 2026-09-16
+
+- Il controller action carica `Authenticator` e `Debug_Logger` anche nei percorsi WP-Cron/callback, evitando job Master falliti con errore "Class MarrisonCustomUpdater\MaintenanceClient\Authenticator not found".
+
+### [9.8.12] - 2026-09-15
+
+- Lo status MCU espone le liste dettagliate `theme_updates` e `translation_updates`, cosi Commander puo mostrare nel Sommario quali temi e traduzioni devono essere aggiornati.
 
 ### [9.8.11] - 2026-09-15
 

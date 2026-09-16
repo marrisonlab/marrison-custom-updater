@@ -454,6 +454,144 @@ trait MCU_Update_Operations_Trait {
         return $fallback !== '' ? $fallback : __('Errore sconosciuto', 'marrison-custom-updater');
     }
 
+    private function mcu_upgrader_failure_message($skin = null, $upgrader = null, $fallback = '') {
+        $messages = [];
+
+        $this->mcu_collect_upgrader_messages($skin, $messages);
+        $this->mcu_collect_upgrader_messages($upgrader, $messages);
+
+        if (is_object($upgrader) && isset($upgrader->skin) && $upgrader->skin !== $skin) {
+            $this->mcu_collect_upgrader_messages($upgrader->skin, $messages);
+        }
+
+        $messages = array_values(array_unique(array_filter($messages)));
+        $diagnostic = array_values(array_filter($messages, [$this, 'mcu_is_diagnostic_upgrader_message']));
+        $selected = !empty($diagnostic) ? $diagnostic : $messages;
+
+        if (!empty($selected)) {
+            return implode(' | ', array_slice($selected, -3));
+        }
+
+        return $fallback !== '' ? $fallback : __('Aggiornamento fallito: WordPress non ha restituito dettagli tecnici.', 'marrison-custom-updater');
+    }
+
+    private function mcu_collect_upgrader_messages($value, &$messages, $depth = 0) {
+        if ($depth > 3 || $value === null || $value === false) {
+            return;
+        }
+
+        if (is_wp_error($value)) {
+            foreach ($value->get_error_codes() as $code) {
+                foreach ($value->get_error_messages($code) as $message) {
+                    $this->mcu_add_upgrader_message($message, $messages);
+                }
+
+                $data = $value->get_error_data($code);
+                if ($data !== null) {
+                    $this->mcu_collect_upgrader_messages($data, $messages, $depth + 1);
+                }
+            }
+            return;
+        }
+
+        if (is_string($value) || is_numeric($value)) {
+            $this->mcu_add_upgrader_message($value, $messages);
+            return;
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                $this->mcu_collect_upgrader_messages($item, $messages, $depth + 1);
+            }
+            return;
+        }
+
+        if (!is_object($value)) {
+            return;
+        }
+
+        if (method_exists($value, 'get_errors')) {
+            $this->mcu_collect_upgrader_messages($value->get_errors(), $messages, $depth + 1);
+        }
+
+        if (method_exists($value, 'get_upgrade_messages')) {
+            $this->mcu_collect_upgrader_messages($value->get_upgrade_messages(), $messages, $depth + 1);
+        }
+
+        foreach (['result', 'errors', 'messages', 'feedback'] as $property) {
+            if (isset($value->$property)) {
+                $this->mcu_collect_upgrader_messages($value->$property, $messages, $depth + 1);
+            }
+        }
+    }
+
+    private function mcu_add_upgrader_message($message, &$messages) {
+        if (!is_scalar($message)) {
+            return;
+        }
+
+        $message = (string) $message;
+        if (function_exists('wp_strip_all_tags')) {
+            $message = wp_strip_all_tags($message);
+        } else {
+            $message = strip_tags($message);
+        }
+
+        $message = html_entity_decode($message, ENT_QUOTES, 'UTF-8');
+        $message = preg_replace_callback('#https?://[^\s<>"\']+#i', function($matches) {
+            return $this->mcu_redact_url_for_log($matches[0]);
+        }, $message);
+        $message = trim(preg_replace('/\s+/', ' ', $message));
+
+        if ($message === '') {
+            return;
+        }
+
+        if (strlen($message) > 500) {
+            $message = substr($message, 0, 500) . '[truncated]';
+        }
+
+        $messages[] = $message;
+    }
+
+    private function mcu_is_diagnostic_upgrader_message($message) {
+        $message = is_string($message) ? $message : '';
+        if ($message === '') {
+            return false;
+        }
+
+        $lower = function_exists('mb_strtolower') ? mb_strtolower($message, 'UTF-8') : strtolower($message);
+        $keywords = [
+            'error',
+            'errore',
+            'failed',
+            'failure',
+            'fallito',
+            'fallita',
+            'impossibile',
+            'unable',
+            'could not',
+            'not found',
+            'non trovato',
+            'non trovata',
+            'not available',
+            'non disponibile',
+            'forbidden',
+            'unauthorized',
+            'pclzip',
+            'cURL',
+            'download_failed',
+        ];
+
+        foreach ($keywords as $keyword) {
+            if (strpos($lower, strtolower($keyword)) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function mcu_has_local_update_lock() {
         return !empty($this->mcu_update_lock_token);
     }
