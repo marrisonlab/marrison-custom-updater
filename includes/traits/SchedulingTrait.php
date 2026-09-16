@@ -1434,6 +1434,15 @@ trait MCU_Scheduling_Trait {
             $log_entry['message'] = 'Eccezione: ' . $e->getMessage();
             update_option('marrison_last_cron_log', $log_entry);
         } finally {
+            // Persist the run counters so the Master/Commander layer can tell a
+            // real update apart from a silent no-op run.
+            $log_entry['updated_plugins_count']      = count($updated_plugins);
+            $log_entry['updated_themes_count']       = count($updated_themes);
+            $log_entry['updated_translations_count'] = (int) $updated_translations;
+            $log_entry['failed_updates_count']       = count($failed_updates);
+            $log_entry['skipped_updates_count']      = count($skipped_updates);
+            update_option('marrison_last_cron_log', $log_entry);
+
             if (!empty($mcu_update_lock) && !is_wp_error($mcu_update_lock)) {
                 $this->mcu_flush_update_caches(['operation' => 'scheduled_updates']);
                 $this->mcu_restore_active_plugin_snapshot($mcu_update_snapshot, ['operation' => 'scheduled_updates']);

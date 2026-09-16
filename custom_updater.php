@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.13
+ * Version: 9.8.15
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.13');
+    define('MCU_PLUGIN_VERSION', '9.8.15');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -80,6 +80,7 @@ class MCU_Custom_Updater {
         add_action('admin_post_mcu_clear_update_lock', [$this, 'mcu_clear_update_lock_admin_action']);
         add_action('admin_post_marrison_force_check_mcu', [$this, 'force_check_mcu']);
         add_filter('mcu_remote_update_plugin', [$this, 'mcu_remote_update_plugin'], 10, 2);
+        add_filter('mcu_remote_update_theme', [$this, 'mcu_remote_update_theme'], 10, 2);
         
         add_action('admin_post_marrison_download_repo_file', [$this, 'download_repo_file']);
         add_action('admin_post_marrison_download_theme_repo_file', [$this, 'download_theme_repo_file']);
@@ -819,8 +820,8 @@ class MCU_Custom_Updater {
 
     /* ===================== THEME UPDATES ===================== */
 
-    public function check_for_theme_updates($transient) {
-        if (!is_admin()) return $transient;
+    public function check_for_theme_updates($transient, $force = false) {
+        if (!$force && !is_admin()) return $transient;
         if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return $transient;
         if (!is_object($transient)) $transient = new stdClass();
         
@@ -1715,6 +1716,200 @@ echo json_encode($data);
             }
 
             update_option('marrison_last_plugins_update_time', current_time('mysql'));
+            return true;
+        });
+    }
+
+    public function mcu_remote_update_theme($response, $parameters) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return [
+                'success' => false,
+                'error_code' => 'client_not_authorized',
+                'message' => __('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater'),
+            ];
+        }
+
+        @ignore_user_abort(true);
+        @set_time_limit(0);
+
+        $parameters = is_array($parameters) ? $parameters : [];
+        $type = sanitize_key((string) ($parameters['type'] ?? ''));
+        $slug = $this->mcu_safe_private_update_slug((string) ($parameters['slug'] ?? ''));
+        $name = sanitize_text_field((string) ($parameters['name'] ?? ''));
+        $new_version = sanitize_text_field((string) ($parameters['new_version'] ?? ''));
+        $package = isset($parameters['package']) ? esc_url_raw((string) $parameters['package']) : '';
+
+        include_once ABSPATH . 'wp-admin/includes/theme.php';
+
+        $theme = wp_get_theme($slug);
+        if (!$theme->exists()) {
+            foreach (wp_get_themes() as $theme_slug => $theme_object) {
+                if (
+                    ($name !== '' && strcasecmp((string) $theme_object->get('Name'), $name) === 0)
+                    || (string) $theme_object->get('TextDomain') === $slug
+                ) {
+                    $slug = sanitize_key((string) $theme_slug);
+                    $theme = $theme_object;
+                    break;
+                }
+            }
+        }
+
+        if ($slug === '' || !$theme->exists()) {
+            return [
+                'success' => false,
+                'error_code' => 'theme_not_found',
+                'message' => __('Tema non trovato sul sito client.', 'marrison-custom-updater'),
+            ];
+        }
+
+        $theme_name = $name !== '' ? $name : (string) $theme->get('Name');
+        $old_version = (string) $theme->get('Version');
+        if ($this->is_item_excluded($slug, 'theme')) {
+            return [
+                'success' => false,
+                'error_code' => 'theme_update_excluded',
+                'message' => __('Tema escluso dagli aggiornamenti.', 'marrison-custom-updater'),
+                'theme' => [
+                    'slug' => $slug,
+                    'name' => $theme_name,
+                    'old_version' => $old_version,
+                    'new_version' => $new_version,
+                ],
+            ];
+        }
+
+        if ($type === 'private') {
+            if ($package === '') {
+                foreach ($this->get_available_theme_updates() as $update) {
+                    if (
+                        (isset($update['slug']) && sanitize_key((string) $update['slug']) === $slug)
+                        || (!empty($update['name']) && strcasecmp((string) $update['name'], $theme_name) === 0)
+                        || (string) $theme->get('TextDomain') === (string) ($update['slug'] ?? '')
+                    ) {
+                        $package = isset($update['download_url']) ? esc_url_raw((string) $update['download_url']) : '';
+                        break;
+                    }
+                }
+            }
+            $result = $package !== ''
+                ? $this->perform_theme_update($slug, $package)
+                : new WP_Error('theme_package_missing', __('URL download tema non disponibile.', 'marrison-custom-updater'));
+        } else {
+            $result = $this->mcu_remote_update_official_theme($slug, $new_version, $package);
+            $type = 'wordpress_org';
+        }
+
+        if (is_wp_error($result)) {
+            return [
+                'success' => false,
+                'error_code' => $result->get_error_code() ?: 'theme_update_failed',
+                'message' => $result->get_error_message(),
+                'theme' => [
+                    'slug' => $slug,
+                    'name' => $theme_name,
+                    'old_version' => $old_version,
+                    'new_version' => $new_version,
+                    'type' => $type,
+                ],
+            ];
+        }
+        if ($result !== true) {
+            return [
+                'success' => false,
+                'error_code' => 'theme_update_failed',
+                'message' => __('Aggiornamento tema non completato.', 'marrison-custom-updater'),
+                'theme' => [
+                    'slug' => $slug,
+                    'name' => $theme_name,
+                    'old_version' => $old_version,
+                    'new_version' => $new_version,
+                    'type' => $type,
+                ],
+            ];
+        }
+
+        clearstatcache();
+        if (function_exists('wp_clean_themes_cache')) {
+            wp_clean_themes_cache(true);
+        }
+        $this->check_for_available_updates();
+        $theme_after = wp_get_theme($slug);
+        $installed_version = $theme_after->exists() ? (string) $theme_after->get('Version') : $new_version;
+
+        return [
+            'success' => true,
+            'message' => sprintf(__('Tema aggiornato: %s.', 'marrison-custom-updater'), $theme_name),
+            'theme' => [
+                'slug' => $slug,
+                'name' => $theme_name,
+                'old_version' => $old_version,
+                'new_version' => $new_version,
+                'installed_version' => $installed_version,
+                'type' => $type,
+            ],
+        ];
+    }
+
+    private function mcu_remote_update_official_theme($slug, $new_version = '', $package = '') {
+        return $this->mcu_run_update_guard('commander_official_theme_update', [
+            'slug' => $slug,
+            'new_version' => $new_version,
+        ], function() use ($slug, $new_version, $package) {
+            include_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+            include_once ABSPATH . 'wp-admin/includes/theme.php';
+            include_once ABSPATH . 'wp-admin/includes/file.php';
+
+            $theme = wp_get_theme($slug);
+            if (!$theme->exists()) {
+                return new WP_Error('theme_not_found', __('Tema non trovato.', 'marrison-custom-updater'));
+            }
+            if ($this->is_item_excluded($slug, 'theme')) {
+                return new WP_Error('theme_update_excluded', __('Tema escluso dagli aggiornamenti.', 'marrison-custom-updater'));
+            }
+
+            $this->create_backup($slug, (string) $theme->get('Version'), 'theme');
+            $transient = get_site_transient('update_themes');
+            if (!is_object($transient)) {
+                $transient = new stdClass();
+            }
+            if (!isset($transient->response) || !is_array($transient->response)) {
+                $transient->response = [];
+            }
+
+            if (!isset($transient->response[$slug]) && $package !== '') {
+                $transient->response[$slug] = [
+                    'theme' => $slug,
+                    'package' => $package,
+                    'new_version' => $new_version,
+                    'url' => '',
+                ];
+                set_site_transient('update_themes', $transient);
+            } elseif (!isset($transient->response[$slug])) {
+                wp_update_themes();
+                $transient = get_site_transient('update_themes');
+                if (!is_object($transient) || empty($transient->response[$slug])) {
+                    return new WP_Error('theme_update_not_found', __('Aggiornamento tema WordPress.org non trovato.', 'marrison-custom-updater'));
+                }
+            }
+
+            $skin = new Automatic_Upgrader_Skin();
+            $upgrader = new Theme_Upgrader($skin);
+            $result = $upgrader->upgrade($slug);
+            if (is_wp_error($result)) {
+                return $result;
+            }
+            if (!$result) {
+                return new WP_Error(
+                    'theme_update_failed',
+                    $this->mcu_upgrader_failure_message(
+                        $skin,
+                        $upgrader,
+                        __('Aggiornamento tema fallito: WordPress non ha restituito dettagli tecnici.', 'marrison-custom-updater')
+                    )
+                );
+            }
+
             return true;
         });
     }

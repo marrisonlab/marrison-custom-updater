@@ -207,6 +207,8 @@ final class Actions_Controller {
 			$payload = self::schedule_diagnostic_snapshot();
 		} elseif ( 'update_plugin' === $operation ) {
 			$payload = self::update_plugin( $parameters );
+		} elseif ( 'update_theme' === $operation ) {
+			$payload = self::update_theme( $parameters );
 		} elseif ( 'update_all' === $operation ) {
 			$payload = self::queue_update( $parameters, $site_id, $master_url );
 		} elseif ( 'revoke_repository_config' === $operation ) {
@@ -317,6 +319,14 @@ final class Actions_Controller {
 					'cost_class'     => 'moderate',
 					'required'       => array( 'plugin_file' ),
 					'allowed_params' => array( 'plugin_file', 'slug', 'name', 'type', 'current_version', 'new_version', 'package', 'job_id', 'step', 'total' ),
+					'timeout'        => 300,
+					'schema_version' => 1,
+				),
+				'update_theme' => array(
+					'type'           => 'write',
+					'cost_class'     => 'moderate',
+					'required'       => array( 'slug' ),
+					'allowed_params' => array( 'slug', 'name', 'type', 'current_version', 'new_version', 'package', 'job_id', 'step', 'total' ),
 					'timeout'        => 300,
 					'schema_version' => 1,
 				),
@@ -535,7 +545,9 @@ final class Actions_Controller {
 			) + $callback;
 		}
 
-		self::clear_update_caches();
+		// Keep the MCU repository lists: the queued job below needs them, and
+		// /status uses them to report the updates still pending.
+		self::clear_update_caches( false );
 
 		$job_id = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : md5( uniqid( 'mcu-master-update', true ) );
 		$run_at = time();
@@ -892,6 +904,95 @@ final class Actions_Controller {
 	}
 
 	/**
+	 * Execute one theme update immediately for Commander.
+	 *
+	 * @param array<string,mixed> $parameters Operation parameters.
+	 * @return array<string,mixed>
+	 */
+	private static function update_theme( array $parameters ) {
+		$job_id = isset( $parameters['job_id'] ) ? sanitize_text_field( (string) $parameters['job_id'] ) : '';
+		if ( '' === $job_id ) {
+			$job_id = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : md5( uniqid( 'mcu-theme-update', true ) );
+		}
+
+		$slug  = self::safe_theme_slug( (string) ( $parameters['slug'] ?? '' ) );
+		$name  = self::safe_text( (string) ( $parameters['name'] ?? '' ) );
+		$step  = max( 1, (int) ( $parameters['step'] ?? 1 ) );
+		$total = max( $step, (int) ( $parameters['total'] ?? $step ) );
+
+		if ( '' === $slug ) {
+			return array(
+				'success'    => false,
+				'error_code' => 'missing_theme',
+				'message'    => __( 'Tema da aggiornare non specificato.', 'marrison-custom-updater' ),
+			);
+		}
+
+		self::clear_master_update_cron_events();
+		self::save_update_status(
+			array(
+				'job_id'       => $job_id,
+				'status'       => 'running',
+				'requested_at' => time(),
+				'started_at'   => time(),
+				'finished_at'  => 0,
+				'operation'    => 'update_theme',
+				'theme_slug'   => $slug,
+				'theme_name'   => $name,
+				'step'         => $step,
+				'total'        => $total,
+				'message'      => sprintf(
+					/* translators: 1: theme name, 2: current step, 3: total steps. */
+					__( 'Aggiornamento tema %1$s (%2$d/%3$d).', 'marrison-custom-updater' ),
+					$name !== '' ? $name : $slug,
+					$step,
+					$total
+				),
+			)
+		);
+
+		$parameters['slug'] = $slug;
+		$parameters['name'] = $name;
+		$result = apply_filters( 'mcu_remote_update_theme', array( 'success' => false, 'error_code' => 'update_theme_unavailable', 'message' => __( 'Runner aggiornamento tema non disponibile.', 'marrison-custom-updater' ) ), $parameters );
+		$result = is_array( $result ) ? $result : array(
+			'success'    => false,
+			'error_code' => 'invalid_update_theme_response',
+			'message'    => __( 'Risposta aggiornamento tema non valida.', 'marrison-custom-updater' ),
+		);
+
+		$success = ! empty( $result['success'] );
+		$message = isset( $result['message'] ) && '' !== trim( (string) $result['message'] )
+			? self::safe_text( (string) $result['message'] )
+			: ( $success ? __( 'Tema aggiornato.', 'marrison-custom-updater' ) : __( 'Aggiornamento tema fallito.', 'marrison-custom-updater' ) );
+
+		self::save_update_status(
+			array_merge(
+				self::current_update_status(),
+				array(
+					'job_id'      => $job_id,
+					'status'      => $success ? 'completed' : 'failed',
+					'finished_at' => time(),
+					'message'     => $message,
+					'error_code'  => $success ? '' : self::safe_text( isset( $result['error_code'] ) ? (string) $result['error_code'] : 'theme_update_failed' ),
+					'theme'       => isset( $result['theme'] ) && is_array( $result['theme'] ) ? self::safe_data( $result['theme'] ) : array(),
+					'last_result' => $result,
+				)
+			)
+		);
+
+		return array_merge(
+			$result,
+			array(
+				'job_id'  => $job_id,
+				'status'  => $success ? 'completed' : 'failed',
+				'step'    => $step,
+				'total'   => $total,
+				'message' => $message,
+			)
+		);
+	}
+
+	/**
 	 * Sanitize a plugin file parameter.
 	 *
 	 * @param string $file Raw plugin file.
@@ -920,6 +1021,12 @@ final class Actions_Controller {
 	 * @return string
 	 */
 	private static function safe_plugin_slug( $slug ) {
+		$slug = sanitize_text_field( (string) $slug );
+		$slug = preg_replace( '/[^A-Za-z0-9._-]/', '', $slug );
+		return substr( (string) $slug, 0, 180 );
+	}
+
+	private static function safe_theme_slug( $slug ) {
 		$slug = sanitize_text_field( (string) $slug );
 		$slug = preg_replace( '/[^A-Za-z0-9._-]/', '', $slug );
 		return substr( (string) $slug, 0, 180 );
@@ -969,24 +1076,30 @@ final class Actions_Controller {
 
 		@ignore_user_abort( true );
 		@set_time_limit( 0 );
-		self::clear_update_caches();
+		self::clear_update_caches( false );
+
+		// The repository lists are the input of this run: without them the job
+		// silently applies nothing. Drop the fetch circuit breaker and make sure
+		// a fresh list is available before starting.
+		$repository_ready = self::prepare_repository_metadata_for_update();
 
 		try {
 			do_action( 'marrison_scheduled_update_event', 'master' );
 			$last_log = get_option( 'marrison_last_cron_log', array() );
 			$log_status = is_array( $last_log ) && isset( $last_log['status'] ) ? sanitize_key( (string) $last_log['status'] ) : '';
-			$finished_status = in_array( $log_status, array( 'error', 'skipped' ), true ) ? 'failed' : 'completed';
-			$message = is_array( $last_log ) && ! empty( $last_log['message'] )
-				? sanitize_text_field( (string) $last_log['message'] )
-				: __( 'Aggiornamento completato tramite Master.', 'marrison-custom-updater' );
+			$outcome    = self::resolve_queued_update_outcome(
+				$log_status,
+				is_array( $last_log ) ? $last_log : array(),
+				$repository_ready
+			);
 
 			$final_status = array_merge(
 				self::current_update_status(),
 				array(
-					'status'      => $finished_status,
-					'stage'       => $finished_status,
+					'status'      => $outcome['status'],
+					'stage'       => $outcome['stage'],
 					'finished_at' => time(),
-					'message'     => $message,
+					'message'     => $outcome['message'],
 					'last_log'    => is_array( $last_log ) ? $last_log : array(),
 				)
 			);
@@ -1005,6 +1118,100 @@ final class Actions_Controller {
 			self::save_update_status( $failed_status );
 			self::notify_update_callback( $failed_status );
 		}
+	}
+
+	/**
+	 * Make sure the MCU repository metadata is available for a queued update.
+	 *
+	 * The update run reads these lists to know what to install. They are
+	 * refreshed here (and the short-lived fetch circuit breaker is cleared) so
+	 * a stale "fetch failed" flag can never turn a queued update into a silent
+	 * no-op.
+	 *
+	 * @return array<string,mixed> Availability report: ok, plugins, themes.
+	 */
+	private static function prepare_repository_metadata_for_update() {
+		delete_transient( 'marrison_updates_fetch_failed' );
+		delete_transient( 'marrison_theme_updates_fetch_failed' );
+
+		if ( ! Settings::repository_config_managed() ) {
+			return array( 'ok' => true, 'plugins' => 0, 'themes' => 0 );
+		}
+
+		$plugin_url = trailingslashit( trim( (string) get_option( 'marrison_repo_url', '' ) ) );
+		$theme_url  = trailingslashit( trim( (string) get_option( 'marrison_themes_repo_url', '' ) ) );
+
+		$plugins = self::fetch_private_repo_updates( 'plugin' );
+		$themes  = self::fetch_private_repo_updates( 'theme' );
+		$plugins = is_array( $plugins ) ? $plugins : array();
+		$themes  = is_array( $themes ) ? $themes : array();
+
+		$failed = false !== get_transient( 'marrison_updates_fetch_failed' )
+			|| false !== get_transient( 'marrison_theme_updates_fetch_failed' );
+
+		return array(
+			'ok'      => ! $failed && ( '' !== $plugin_url || '' !== $theme_url ),
+			'plugins' => count( $plugins ),
+			'themes'  => count( $themes ),
+		);
+	}
+
+	/**
+	 * Decide the terminal state of a queued Master update.
+	 *
+	 * A run that applied nothing must not be reported as completed when the
+	 * repository metadata was unavailable: Commander would otherwise show a
+	 * healthy site while every update is still pending.
+	 *
+	 * @param string              $log_status       Cron log status.
+	 * @param array<string,mixed> $last_log         Cron log entry.
+	 * @param array<string,mixed> $repository_ready Availability report.
+	 * @return array<string,string> status, stage, message.
+	 */
+	private static function resolve_queued_update_outcome( $log_status, array $last_log, array $repository_ready ) {
+		$applied  = (int) ( isset( $last_log['updated_plugins_count'] ) ? $last_log['updated_plugins_count'] : 0 )
+			+ (int) ( isset( $last_log['updated_themes_count'] ) ? $last_log['updated_themes_count'] : 0 )
+			+ (int) ( isset( $last_log['updated_translations_count'] ) ? $last_log['updated_translations_count'] : 0 );
+		$problems = (int) ( isset( $last_log['failed_updates_count'] ) ? $last_log['failed_updates_count'] : 0 )
+			+ (int) ( isset( $last_log['skipped_updates_count'] ) ? $last_log['skipped_updates_count'] : 0 );
+
+		$message = is_array( $last_log ) && ! empty( $last_log['message'] )
+			? sanitize_text_field( (string) $last_log['message'] )
+			: __( 'Aggiornamento completato tramite Master.', 'marrison-custom-updater' );
+
+		if ( 'error' === $log_status || 'skipped' === $log_status ) {
+			return array( 'status' => 'failed', 'stage' => $log_status, 'message' => $message );
+		}
+
+		if ( $problems > 0 ) {
+			return array(
+				'status'  => 'failed',
+				'stage'   => 'failed',
+				'message' => sprintf(
+					/* translators: %s: cron log message. */
+					__( 'Aggiornamento non completato. %s', 'marrison-custom-updater' ),
+					$message
+				),
+			);
+		}
+
+		if ( 0 === $applied && empty( $repository_ready['ok'] ) ) {
+			return array(
+				'status'  => 'failed',
+				'stage'   => 'repository_unavailable',
+				'message' => __( 'Nessun aggiornamento applicato: impossibile recuperare l\'elenco degli aggiornamenti dal repository privato MCU.', 'marrison-custom-updater' ),
+			);
+		}
+
+		if ( 0 === $applied ) {
+			return array(
+				'status'  => 'completed',
+				'stage'   => 'completed',
+				'message' => __( 'Nessun aggiornamento da applicare: il sito risulta già aggiornato.', 'marrison-custom-updater' ),
+			);
+		}
+
+		return array( 'status' => 'completed', 'stage' => 'completed', 'message' => $message );
 	}
 
 	/**
@@ -1561,11 +1768,21 @@ final class Actions_Controller {
 	/**
 	 * Clear MCU and WordPress update caches.
 	 *
+	 * The private repository lists are the data source of both the update job
+	 * and the /status report: wiping them mid-flow leaves the site looking
+	 * updated while nothing was applied. They are therefore preserved unless
+	 * the caller explicitly asks for a full wipe (e.g. force_sync, which
+	 * refetches them right after).
+	 *
+	 * @param bool $include_repository_lists Whether to also drop the MCU repository lists.
 	 * @return void
 	 */
-	private static function clear_update_caches() {
-		delete_transient( 'marrison_available_updates_v2' );
-		delete_transient( 'marrison_available_theme_updates' );
+	private static function clear_update_caches( $include_repository_lists = true ) {
+		if ( $include_repository_lists ) {
+			delete_transient( 'marrison_available_updates_v2' );
+			delete_transient( 'marrison_available_theme_updates' );
+		}
+
 		delete_site_transient( 'update_plugins' );
 		delete_site_transient( 'update_themes' );
 
@@ -1643,7 +1860,7 @@ final class Actions_Controller {
 	 * @param string $type plugin|theme.
 	 * @return array<int,array<string,mixed>>
 	 */
-	private static function fetch_private_repo_updates( $type = 'plugin' ) {
+	public static function fetch_private_repo_updates( $type = 'plugin' ) {
 		$type              = 'theme' === $type ? 'theme' : 'plugin';
 		if ( ! Settings::repository_config_managed() ) {
 			return array();

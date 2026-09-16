@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.15] - 2026-09-16
+
+### Added
+- Aggiunta l'operazione remota firmata `update_theme`, cosi Marrison Commander puo aggiornare un singolo tema tramite MCU come gia avviene per i plugin.
+
+### Fixed
+- Gli aggiornamenti tema avviati da Commander supportano sia temi privati MCU sia temi ufficiali WordPress, rispettando le esclusioni configurate.
+- Il refresh forzato degli update tema ricostruisce il transient anche nei percorsi non-admin, evitando che WP-Cron/Commander non vedano un tema ancora disponibile dopo il job.
+
+## [9.8.14] - 2026-09-16
+
+### Fixed
+- Lo status MCU non dipende piu dal transient `marrison_available_updates_v2`/`marrison_available_theme_updates`: se la cache e assente viene ricostruita dal repository privato (rispettando il breaker da 5 minuti), cosi un cache-wipe non puo piu far apparire il sito "tutto aggiornato" mentre gli aggiornamenti sono ancora pendenti.
+- Il percorso di update non cancella piu le liste del repository privato (`clear_update_caches` con `$include_repository_lists = false` in `queue_update`/`run_queued_update`): il job accodato parte con i metadati necessari invece di applicare zero aggiornamenti.
+- Il job accodato azzera i breaker `marrison_updates_fetch_failed`/`marrison_theme_updates_fetch_failed` e riscarica le liste subito prima dell'esecuzione (`prepare_repository_metadata_for_update`), evitando aggiornamenti a vuoto per un flag di fetch fallito ancora attivo.
+
+### Changed
+- L'esito del job Master non e piu dedotto da un fallback incondizionato a `completed`: `resolve_queued_update_outcome` marca `failed` (stage `repository_unavailable`) quando non e stato applicato nulla e i metadati del repository non erano disponibili.
+- `marrison_last_cron_log` registra i conteggi di plugin/temi/traduzioni aggiornati e di aggiornamenti falliti/saltati, usati per determinare l'esito reale del job.
+- `Actions_Controller::fetch_private_repo_updates()` e `public` per consentire allo status di ricostruire le liste MCU.
+
 ## [9.8.13] - 2026-09-16
 
 ### Fixed

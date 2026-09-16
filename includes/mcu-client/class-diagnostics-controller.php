@@ -85,7 +85,7 @@ final class Diagnostics_Controller {
 	 * @return array<int,string>
 	 */
 	public static function supported_write_operations() {
-		return array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete', 'debug_log_clear' );
+		return array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete', 'debug_log_clear' );
 	}
 
 	/**

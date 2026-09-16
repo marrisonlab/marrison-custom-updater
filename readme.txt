@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.13
+Stable tag: 9.8.15
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -35,6 +35,16 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.15 =
+* **Nuovo**: Aggiunta l'operazione remota firmata `update_theme`, cosi Marrison Commander puo aggiornare un singolo tema tramite MCU.
+* **Fix**: Gli aggiornamenti tema da Commander supportano temi privati MCU e temi ufficiali WordPress, rispettando le esclusioni configurate.
+* **Fix**: Il refresh forzato degli update tema ricostruisce il transient anche nei percorsi non-admin, evitando verifiche finali incoerenti da WP-Cron/Commander.
+
+= 9.8.14 =
+* **Fix**: Lo status MCU ricostruisce le liste repository quando la cache update e assente, evitando falsi "tutto aggiornato" dopo cache-wipe.
+* **Fix**: Il percorso di update conserva i metadati del repository privato e prepara nuovamente le liste prima dell'esecuzione del job accodato.
+* **Cambiamento**: L'esito del job Master non usa piu un fallback incondizionato a `completed` quando nessun aggiornamento e stato applicato.
 
 = 9.8.13 =
 * **Fix**: Il controller action carica `Authenticator` e `Debug_Logger` anche nei percorsi WP-Cron/callback, evitando job Master falliti con errore "Class MarrisonCustomUpdater\MaintenanceClient\Authenticator not found".

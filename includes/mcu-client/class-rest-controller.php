@@ -147,6 +147,7 @@ final class Rest_Controller {
 			'snapshot'                   => $diagnostics['snapshot'],
 			'snapshot_pipeline'          => $diagnostics['snapshot_pipeline'],
 			'site_url'                   => site_url(),
+			'site_ip'                    => self::site_ip(),
 			'site_name'                  => get_bloginfo( 'name' ),
 			'client_plugin_version'      => defined( 'MCU_PLUGIN_VERSION' ) ? MCU_PLUGIN_VERSION : '',
 			'mcu_plugin_version'         => defined( 'MCU_PLUGIN_VERSION' ) ? MCU_PLUGIN_VERSION : '',
@@ -210,7 +211,7 @@ final class Rest_Controller {
 		} catch ( \Throwable $exception ) {
 			return array(
 				'supported_read_operations'  => array(),
-				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
+				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
 				'snapshot'                   => array(
 					'available' => false,
 					'status'    => 'unavailable',
@@ -333,6 +334,71 @@ final class Rest_Controller {
 	}
 
 	/**
+	 * Return the private repository plugin metadata, rebuilding the MCU cache
+	 * when it is missing.
+	 *
+	 * The report must never depend on a cache that an update run has cleared:
+	 * a deleted transient would otherwise make the site look fully updated.
+	 *
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function private_plugin_update_metadata() {
+		if ( ! Settings::repository_config_managed() ) {
+			return array();
+		}
+
+		$cached = get_transient( 'marrison_available_updates_v2' );
+		if ( is_array( $cached ) && array() !== $cached ) {
+			return $cached;
+		}
+
+		// Respect the short-lived fetch circuit breaker so a broken repository
+		// is not hammered by every status poll.
+		if ( false !== get_transient( 'marrison_updates_fetch_failed' ) ) {
+			return is_array( $cached ) ? $cached : array();
+		}
+
+		if ( class_exists( __NAMESPACE__ . '\\Actions_Controller' ) ) {
+			$fresh = \MarrisonCustomUpdater\MaintenanceClient\Actions_Controller::fetch_private_repo_updates( 'plugin' );
+			if ( is_array( $fresh ) && array() !== $fresh ) {
+				return $fresh;
+			}
+		}
+
+		return is_array( $cached ) ? $cached : array();
+	}
+
+	/**
+	 * Return the private repository theme metadata, rebuilding the MCU cache
+	 * when it is missing.
+	 *
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function private_theme_update_metadata() {
+		if ( ! Settings::repository_config_managed() ) {
+			return array();
+		}
+
+		$cached = get_transient( 'marrison_available_theme_updates' );
+		if ( is_array( $cached ) && array() !== $cached ) {
+			return $cached;
+		}
+
+		if ( false !== get_transient( 'marrison_theme_updates_fetch_failed' ) ) {
+			return is_array( $cached ) ? $cached : array();
+		}
+
+		if ( class_exists( __NAMESPACE__ . '\\Actions_Controller' ) ) {
+			$fresh = \MarrisonCustomUpdater\MaintenanceClient\Actions_Controller::fetch_private_repo_updates( 'theme' );
+			if ( is_array( $fresh ) && array() !== $fresh ) {
+				return $fresh;
+			}
+		}
+
+		return is_array( $cached ) ? $cached : array();
+	}
+
+	/**
 	 * Return plugin updates with display metadata for the Master details panel.
 	 *
 	 * @param array<string,array<string,string>> $plugins        Installed plugins.
@@ -343,7 +409,7 @@ final class Rest_Controller {
 		$items = array();
 		$seen  = array();
 
-		$private_updates = Settings::repository_config_managed() ? get_transient( 'marrison_available_updates_v2' ) : array();
+		$private_updates = self::private_plugin_update_metadata();
 		if ( is_array( $private_updates ) ) {
 			foreach ( $private_updates as $update ) {
 				if ( ! is_array( $update ) || empty( $update['slug'] ) ) {
@@ -778,7 +844,7 @@ final class Rest_Controller {
 		}
 
 		if ( Settings::repository_config_managed() ) {
-			$private_updates = get_transient( 'marrison_available_theme_updates' );
+			$private_updates = self::private_theme_update_metadata();
 			if ( is_array( $private_updates ) ) {
 				foreach ( $private_updates as $update ) {
 					if ( ! is_array( $update ) || empty( $update['slug'] ) || empty( $update['version'] ) ) {
@@ -878,7 +944,7 @@ final class Rest_Controller {
 			return $count;
 		}
 
-		$private_updates = get_transient( 'marrison_available_theme_updates' );
+		$private_updates = self::private_theme_update_metadata();
 		if ( ! is_array( $private_updates ) ) {
 			return $count;
 		}
@@ -1070,6 +1136,27 @@ final class Rest_Controller {
 		}
 
 		return sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) );
+	}
+
+	/**
+	 * Return the server IP address reported by PHP, when available.
+	 *
+	 * @return string
+	 */
+	private static function site_ip() {
+		$candidates = array(
+			isset( $_SERVER['SERVER_ADDR'] ) ? wp_unslash( $_SERVER['SERVER_ADDR'] ) : '',
+			isset( $_SERVER['LOCAL_ADDR'] ) ? wp_unslash( $_SERVER['LOCAL_ADDR'] ) : '',
+		);
+
+		foreach ( $candidates as $candidate ) {
+			$ip = trim( (string) $candidate );
+			if ( '' !== $ip && filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+				return sanitize_text_field( $ip );
+			}
+		}
+
+		return '';
 	}
 
 	/**

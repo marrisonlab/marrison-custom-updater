@@ -2247,6 +2247,8 @@ JS
         }
         wp_update_themes();
         $theme_updates_transient = get_site_transient('update_themes');
+        $theme_updates_transient = $this->check_for_theme_updates($theme_updates_transient, true);
+        set_site_transient('update_themes', $theme_updates_transient);
         
         // Filter themes count and collect data
         $themes_to_update = [];
