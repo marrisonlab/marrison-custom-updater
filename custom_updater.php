@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.15
+ * Version: 9.8.22
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.15');
+    define('MCU_PLUGIN_VERSION', '9.8.22');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -95,7 +95,6 @@ class MCU_Custom_Updater {
         // Cron
         add_filter('cron_schedules', [$this, 'add_custom_cron_intervals']);
         add_action('marrison_scheduled_update_event', [$this, 'run_scheduled_updates'], 10, 1);
-        add_action('init', [$this, 'mcu_repair_missing_automatic_update_schedule'], 20);
         
         // Hook per AJAX
         add_action('wp_ajax_marrison_update_plugin_ajax', [$this, 'update_plugin_ajax']);
@@ -128,12 +127,8 @@ class MCU_Custom_Updater {
         add_action('admin_init', [$this, 'flush_rules_on_upgrade']);
         add_action('admin_init', [$this, 'maybe_cleanup_files_backup_retention']);
 
-        // Ricalcola il conteggio badge ad ogni richiesta admin: senza questo hook
-        // il valore restava bloccato all'ultimo conteggio calcolato dopo un update
-        // manuale, anche quando non c'erano più aggiornamenti reali disponibili.
-        // get_available_updates()/get_available_theme_updates() sono già cachate
-        // con transient da 6h, quindi non introduce chiamate HTTP ripetute.
-        add_action('admin_init', [$this, 'check_for_available_updates']);
+        // Il conteggio update viene ricalcolato da azioni esplicite, REST/Commander,
+        // cron pianificati o quando si apre la pagina MCU, non ad ogni admin page.
         
         // Filtro per abilitare auto-update per questo plugin
         // add_filter('auto_update_plugin', [$this, 'auto_update_specific_plugins'], 10, 2);
@@ -200,14 +195,27 @@ class MCU_Custom_Updater {
 
         if ($state) {
             // Add to exclusion
-            if (!in_array($slug, $excluded)) {
+            if (!$this->is_item_excluded($slug, $type)) {
                 $excluded[] = $slug;
             }
         } else {
-            // Remove from exclusion
-            $excluded = array_values(array_filter($excluded, function($s) use ($slug) {
-                return $s !== $slug;
-            }));
+            // Remove matching entries even when Commander stored a plugin file
+            // and the MCU UI sends only the plugin slug.
+            if ($type === 'plugin') {
+                $target_keys = $this->mcu_plugin_identifier_keys($slug);
+                $excluded = array_values(array_filter($excluded, function($s) use ($target_keys) {
+                    foreach ($this->mcu_plugin_identifier_keys($s) as $key) {
+                        if (in_array($key, $target_keys, true)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }));
+            } else {
+                $excluded = array_values(array_filter($excluded, function($s) use ($slug) {
+                    return $s !== $slug;
+                }));
+            }
         }
 
         update_option($option_name, $excluded);
@@ -681,6 +689,11 @@ class MCU_Custom_Updater {
     }
 
     public function flush_rules_on_upgrade() {
+        $page = isset($_GET['page']) ? sanitize_key((string) $_GET['page']) : '';
+        if (strpos($page, 'marrison-updater') !== 0) {
+            return;
+        }
+
         // Run only once for version 8.7
         if (get_option('marrison_custom_updater_version') !== '8.7') {
             flush_rewrite_rules();
@@ -1779,22 +1792,26 @@ echo json_encode($data);
             ];
         }
 
-        if ($type === 'private') {
+        $private_package = '';
+        foreach ($this->get_available_theme_updates() as $update) {
+            if (
+                (isset($update['slug']) && sanitize_key((string) $update['slug']) === $slug)
+                || (!empty($update['name']) && strcasecmp((string) $update['name'], $theme_name) === 0)
+                || (string) $theme->get('TextDomain') === (string) ($update['slug'] ?? '')
+            ) {
+                $private_package = isset($update['download_url']) ? esc_url_raw((string) $update['download_url']) : '';
+                break;
+            }
+        }
+
+        if ($type === 'private' || $private_package !== '') {
             if ($package === '') {
-                foreach ($this->get_available_theme_updates() as $update) {
-                    if (
-                        (isset($update['slug']) && sanitize_key((string) $update['slug']) === $slug)
-                        || (!empty($update['name']) && strcasecmp((string) $update['name'], $theme_name) === 0)
-                        || (string) $theme->get('TextDomain') === (string) ($update['slug'] ?? '')
-                    ) {
-                        $package = isset($update['download_url']) ? esc_url_raw((string) $update['download_url']) : '';
-                        break;
-                    }
-                }
+                $package = $private_package;
             }
             $result = $package !== ''
                 ? $this->perform_theme_update($slug, $package)
                 : new WP_Error('theme_package_missing', __('URL download tema non disponibile.', 'marrison-custom-updater'));
+            $type = 'private';
         } else {
             $result = $this->mcu_remote_update_official_theme($slug, $new_version, $package);
             $type = 'wordpress_org';

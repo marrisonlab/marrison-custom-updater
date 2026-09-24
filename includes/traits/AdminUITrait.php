@@ -1498,6 +1498,7 @@ JS
             }
         }
         $total_updates = $repo_updates_count + $theme_updates_count;
+        update_option('marrison_available_updates_count', $total_updates);
         $repo_url_config = get_option('marrison_repo_url');
         $theme_repo_url_config = get_option('marrison_themes_repo_url');
         $transient_plugins = get_site_transient('update_plugins');

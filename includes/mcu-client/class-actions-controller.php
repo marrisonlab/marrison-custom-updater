@@ -209,6 +209,8 @@ final class Actions_Controller {
 			$payload = self::update_plugin( $parameters );
 		} elseif ( 'update_theme' === $operation ) {
 			$payload = self::update_theme( $parameters );
+		} elseif ( 'set_update_exclusion' === $operation ) {
+			$payload = self::set_update_exclusion( $parameters );
 		} elseif ( 'update_all' === $operation ) {
 			$payload = self::queue_update( $parameters, $site_id, $master_url );
 		} elseif ( 'revoke_repository_config' === $operation ) {
@@ -328,6 +330,14 @@ final class Actions_Controller {
 					'required'       => array( 'slug' ),
 					'allowed_params' => array( 'slug', 'name', 'type', 'current_version', 'new_version', 'package', 'job_id', 'step', 'total' ),
 					'timeout'        => 300,
+					'schema_version' => 1,
+				),
+				'set_update_exclusion' => array(
+					'type'           => 'write',
+					'cost_class'     => 'light',
+					'required'       => array( 'type', 'identifier' ),
+					'allowed_params' => array( 'type', 'identifier', 'file', 'slug', 'name', 'excluded' ),
+					'timeout'        => 30,
 					'schema_version' => 1,
 				),
 				'diagnostics_schedule_snapshot' => array(
@@ -993,6 +1003,103 @@ final class Actions_Controller {
 	}
 
 	/**
+	 * Persist plugin/theme update exclusion requested by Commander.
+	 *
+	 * @param array<string,mixed> $parameters Operation parameters.
+	 * @return array<string,mixed>
+	 */
+	private static function set_update_exclusion( array $parameters ) {
+		$type       = sanitize_key( (string) ( $parameters['type'] ?? 'plugin' ) );
+		$type       = 'theme' === $type ? 'theme' : 'plugin';
+		$identifier = self::safe_text( (string) ( $parameters['identifier'] ?? '' ) );
+		$file       = self::safe_text( (string) ( $parameters['file'] ?? '' ) );
+		$slug       = 'theme' === $type ? self::safe_theme_slug( (string) ( $parameters['slug'] ?? $identifier ) ) : self::safe_plugin_slug( (string) ( $parameters['slug'] ?? $identifier ) );
+		$name       = self::safe_text( (string) ( $parameters['name'] ?? '' ) );
+		if ( ! array_key_exists( 'excluded', $parameters ) ) {
+			return array(
+				'success'    => false,
+				'error_code' => 'missing_excluded',
+				'message'    => __( 'Stato esclusione non specificato.', 'marrison-custom-updater' ),
+			);
+		}
+		$excluded = self::truthy_parameter( $parameters['excluded'] );
+
+		if ( '' === $identifier ) {
+			$identifier = 'theme' === $type ? $slug : ( '' !== $file ? $file : $slug );
+		}
+		if ( '' === $identifier ) {
+			return array(
+				'success'    => false,
+				'error_code' => 'missing_identifier',
+				'message'    => __( 'Elemento da escludere non specificato.', 'marrison-custom-updater' ),
+			);
+		}
+
+		$option_name = 'theme' === $type ? 'marrison_excluded_themes' : 'marrison_excluded_plugins';
+		$stored      = get_option( $option_name, array() );
+		$stored      = is_array( $stored ) ? array_values( array_map( 'strval', $stored ) ) : array();
+		$target      = 'theme' === $type ? self::safe_theme_slug( $identifier ) : self::safe_text( $identifier );
+		$before_count = count( $stored );
+
+		if ( 'plugin' === $type ) {
+			$candidates = array_filter( array( $identifier, $file, $slug, $name ) );
+			$candidates = self::expand_plugin_exclusion_candidates( $candidates );
+			$target_key = self::plugin_identifier_key_list( $candidates );
+			$stored     = array_values(
+				array_filter(
+					$stored,
+					static function ( $item ) use ( $target_key ) {
+						foreach ( self::plugin_identifier_key_list( array( $item ) ) as $key ) {
+							if ( isset( $target_key[ $key ] ) ) {
+								return false;
+							}
+						}
+						return true;
+					}
+				)
+			);
+		} else {
+			$stored = array_values(
+				array_filter(
+					$stored,
+					static function ( $item ) use ( $target ) {
+						return sanitize_key( (string) $item ) !== $target;
+					}
+				)
+			);
+		}
+		$after_remove_count = count( $stored );
+		$remaining_matches  = 'plugin' === $type
+			? self::count_matching_plugin_exclusions( $stored, isset( $target_key ) ? $target_key : array() )
+			: 0;
+
+		if ( $excluded && '' !== $target ) {
+			$stored[] = $target;
+			$stored   = array_values( array_unique( $stored ) );
+		}
+
+		update_option( $option_name, $stored, false );
+		delete_site_transient( 'update_plugins' );
+		delete_site_transient( 'update_themes' );
+
+		return array(
+			'success'    => true,
+			'message'    => $excluded ? __( 'Elemento escluso dagli aggiornamenti.', 'marrison-custom-updater' ) : __( 'Elemento riammesso negli aggiornamenti.', 'marrison-custom-updater' ),
+			'type'       => $type,
+			'identifier' => $target,
+			'excluded'   => $excluded,
+			'before_count' => $before_count,
+			'after_count'  => count( $stored ),
+			'removed_count' => max( 0, $before_count - $after_remove_count ),
+			'remaining_match_count' => $remaining_matches,
+			'exclusions' => array(
+				'plugins' => get_option( 'marrison_excluded_plugins', array() ),
+				'themes'  => get_option( 'marrison_excluded_themes', array() ),
+			),
+		);
+	}
+
+	/**
 	 * Sanitize a plugin file parameter.
 	 *
 	 * @param string $file Raw plugin file.
@@ -1015,6 +1122,25 @@ final class Actions_Controller {
 	}
 
 	/**
+	 * Parse Commander boolean-like parameters without treating a present "0" as
+	 * a missing required value.
+	 *
+	 * @param mixed $value Raw parameter.
+	 * @return bool
+	 */
+	private static function truthy_parameter( $value ) {
+		if ( is_bool( $value ) ) {
+			return $value;
+		}
+		if ( is_int( $value ) || is_float( $value ) ) {
+			return 0 !== (int) $value;
+		}
+
+		$value = strtolower( trim( (string) $value ) );
+		return in_array( $value, array( '1', 'true', 'yes', 'on' ), true );
+	}
+
+	/**
 	 * Preserve private repository slugs such as plugin-v1.2.3.
 	 *
 	 * @param string $slug Raw slug.
@@ -1030,6 +1156,114 @@ final class Actions_Controller {
 		$slug = sanitize_text_field( (string) $slug );
 		$slug = preg_replace( '/[^A-Za-z0-9._-]/', '', $slug );
 		return substr( (string) $slug, 0, 180 );
+	}
+
+	/**
+	 * Build comparison keys for plugin identifiers.
+	 *
+	 * @param array<int,string> $identifiers Plugin identifiers.
+	 * @return array<string,bool>
+	 */
+	private static function plugin_identifier_key_list( array $identifiers ) {
+		$keys = array();
+		foreach ( $identifiers as $identifier ) {
+			$identifier = strtolower( trim( (string) $identifier ) );
+			if ( '' === $identifier ) {
+				continue;
+			}
+			$keys[ sanitize_key( $identifier ) ] = true;
+			$normalized = self::normalize_plugin_match_key( $identifier );
+			if ( '' !== $normalized ) {
+				$keys[ $normalized ] = true;
+			}
+			$keys[ sanitize_key( basename( $identifier, '.php' ) ) ] = true;
+			$basename_key = self::normalize_plugin_match_key( basename( $identifier, '.php' ) );
+			if ( '' !== $basename_key ) {
+				$keys[ $basename_key ] = true;
+			}
+			$dir = dirname( $identifier );
+			if ( '.' !== $dir && '' !== $dir ) {
+				$keys[ sanitize_key( $dir ) ] = true;
+				$dir_key = self::normalize_plugin_match_key( $dir );
+				if ( '' !== $dir_key ) {
+					$keys[ $dir_key ] = true;
+				}
+			}
+		}
+
+		unset( $keys[''] );
+		return $keys;
+	}
+
+	/**
+	 * Expand a plugin exclusion request using installed plugin metadata.
+	 *
+	 * @param array<int,string> $candidates Request identifiers.
+	 * @return array<int,string>
+	 */
+	private static function expand_plugin_exclusion_candidates( array $candidates ) {
+		$expanded = array_values( array_filter( array_map( 'strval', $candidates ) ) );
+		$target_keys = self::plugin_identifier_key_list( $expanded );
+		if ( empty( $target_keys ) ) {
+			return $expanded;
+		}
+
+		if ( ! function_exists( 'get_plugins' ) && defined( 'ABSPATH' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		if ( ! function_exists( 'get_plugins' ) ) {
+			return $expanded;
+		}
+
+		foreach ( get_plugins() as $plugin_file => $plugin_data ) {
+			$plugin_file = (string) $plugin_file;
+			$plugin_name = isset( $plugin_data['Name'] ) ? (string) $plugin_data['Name'] : '';
+			$dirname     = dirname( $plugin_file );
+			$basename    = basename( $plugin_file, '.php' );
+			$installed   = array_filter( array( $plugin_file, $plugin_name, $dirname, $basename ) );
+			$installed_keys = self::plugin_identifier_key_list( $installed );
+
+			foreach ( $installed_keys as $key => $present ) {
+				if ( $present && isset( $target_keys[ $key ] ) ) {
+					$expanded = array_merge( $expanded, $installed );
+					break;
+				}
+			}
+		}
+
+		return array_values( array_unique( array_filter( $expanded ) ) );
+	}
+
+	/**
+	 * Match plugin names, slugs and files the same way as the status endpoint.
+	 *
+	 * @param string $value Raw identifier.
+	 * @return string
+	 */
+	private static function normalize_plugin_match_key( $value ) {
+		$normalized = preg_replace( '/[^a-z0-9]/', '', strtolower( (string) $value ) );
+		return is_string( $normalized ) ? $normalized : '';
+	}
+
+	/**
+	 * Count stored plugin exclusions that still match the requested target.
+	 *
+	 * @param array<int,string>  $stored Stored exclusion identifiers.
+	 * @param array<string,bool> $target_key Comparison keys.
+	 * @return int
+	 */
+	private static function count_matching_plugin_exclusions( array $stored, array $target_key ) {
+		$count = 0;
+		foreach ( $stored as $item ) {
+			foreach ( self::plugin_identifier_key_list( array( $item ) ) as $key ) {
+				if ( isset( $target_key[ $key ] ) ) {
+					$count++;
+					break;
+				}
+			}
+		}
+
+		return $count;
 	}
 
 	/**

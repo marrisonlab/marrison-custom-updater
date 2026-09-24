@@ -117,6 +117,8 @@ final class Rest_Controller {
 		$plugin_update_count = count( $plugin_update_items );
 		$theme_update_items  = self::theme_update_items( $theme_updates );
 		$theme_update_count  = count( $theme_update_items );
+		$plugin_inventory    = self::plugin_inventory_items( $plugins, $plugin_update_items );
+		$theme_inventory     = self::theme_inventory_items( $theme_update_items );
 		$core_update_count   = self::core_update_count( $core_updates );
 		$translation_items   = self::translation_update_items( $plugin_updates, $theme_updates, $core_updates );
 		$translation_count   = count( $translation_items );
@@ -166,10 +168,13 @@ final class Rest_Controller {
 			'wordpress_updates_count'    => $core_update_count,
 			'plugin_updates_count'       => $plugin_update_count,
 			'plugin_updates'             => $plugin_update_items,
+			'plugin_inventory'           => $plugin_inventory,
 			'theme_updates_count'        => $theme_update_count,
 			'theme_updates'              => $theme_update_items,
+			'theme_inventory'            => $theme_inventory,
 			'translation_updates_count'  => $translation_count,
 			'translation_updates'        => $translation_items,
+			'update_exclusions'          => self::update_exclusions(),
 			'mcu_private_updates_count'  => $mcu_update_count,
 			'updates_data_fresh'         => $updates_fresh,
 			'updates_may_be_stale'       => ! $updates_fresh,
@@ -211,7 +216,7 @@ final class Rest_Controller {
 		} catch ( \Throwable $exception ) {
 			return array(
 				'supported_read_operations'  => array(),
-				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
+				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'set_update_exclusion', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
 				'snapshot'                   => array(
 					'available' => false,
 					'status'    => 'unavailable',
@@ -497,6 +502,49 @@ final class Rest_Controller {
 			'current_version' => sanitize_text_field( $current ),
 			'new_version'     => sanitize_text_field( $new_version ),
 		);
+	}
+
+	/**
+	 * Return installed plugins with exclusion and update metadata.
+	 *
+	 * @param array<string,array<string,string>> $plugins Installed plugins.
+	 * @param array<int,array<string,string>>    $updates Update items.
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function plugin_inventory_items( array $plugins, array $updates ) {
+		$updates_by_file = array();
+		foreach ( $updates as $update ) {
+			if ( ! empty( $update['file'] ) ) {
+				$updates_by_file[ (string) $update['file'] ] = $update;
+			}
+		}
+
+		$items = array();
+		foreach ( $plugins as $file => $data ) {
+			$file   = (string) $file;
+			$slug   = self::plugin_update_slug( $file, null );
+			$name   = isset( $data['Name'] ) && '' !== $data['Name'] ? (string) $data['Name'] : $slug;
+			$update = isset( $updates_by_file[ $file ] ) ? $updates_by_file[ $file ] : array();
+			$items[] = array(
+				'file'            => sanitize_text_field( $file ),
+				'slug'            => sanitize_key( $slug ),
+				'name'            => sanitize_text_field( $name ),
+				'current_version' => sanitize_text_field( isset( $data['Version'] ) ? (string) $data['Version'] : '' ),
+				'new_version'     => sanitize_text_field( isset( $update['new_version'] ) ? (string) $update['new_version'] : '' ),
+				'type'            => sanitize_key( isset( $update['type'] ) ? (string) $update['type'] : '' ),
+				'has_update'      => ! empty( $update ),
+				'excluded'        => self::is_plugin_update_excluded( $slug, $file, $name, null ),
+			);
+		}
+
+		usort(
+			$items,
+			static function ( $first, $second ) {
+				return strcasecmp( (string) $first['name'], (string) $second['name'] );
+			}
+		);
+
+		return array_values( $items );
 	}
 
 	/**
@@ -821,11 +869,12 @@ final class Rest_Controller {
 	 * @return array<int,array<string,string>>
 	 */
 	private static function theme_update_items( $transient ) {
-		$items    = array();
-		$seen     = array();
-		$excluded = get_option( 'marrison_excluded_themes', array() );
-		$excluded = is_array( $excluded ) ? array_map( 'sanitize_key', $excluded ) : array();
-		$themes   = function_exists( 'wp_get_themes' ) ? wp_get_themes() : array();
+		$items           = array();
+		$seen            = array();
+		$private_updates = Settings::repository_config_managed() ? self::private_theme_update_metadata() : null;
+		$excluded        = get_option( 'marrison_excluded_themes', array() );
+		$excluded        = is_array( $excluded ) ? array_map( 'sanitize_key', $excluded ) : array();
+		$themes          = function_exists( 'wp_get_themes' ) ? wp_get_themes() : array();
 
 		if ( is_object( $transient ) && isset( $transient->response ) && is_array( $transient->response ) ) {
 			foreach ( $transient->response as $slug => $update ) {
@@ -838,13 +887,14 @@ final class Rest_Controller {
 				$name        = $theme && $theme->exists() ? (string) $theme->get( 'Name' ) : $slug;
 				$current     = $theme && $theme->exists() ? (string) $theme->get( 'Version' ) : '';
 				$new_version = self::update_value( $update, 'new_version' );
-				$items[]     = self::theme_update_item( 'wordpress_org', $slug, $name, $current, $new_version );
+				$package     = self::update_value( $update, 'package' );
+				$type        = self::private_theme_update_for_slug( $private_updates, $slug, $name, $theme ) ? 'private' : 'wordpress_org';
+				$items[]     = self::theme_update_item( $type, $slug, $name, $current, $new_version, $package );
 				$seen[ $slug ] = true;
 			}
 		}
 
 		if ( Settings::repository_config_managed() ) {
-			$private_updates = self::private_theme_update_metadata();
 			if ( is_array( $private_updates ) ) {
 				foreach ( $private_updates as $update ) {
 					if ( ! is_array( $update ) || empty( $update['slug'] ) || empty( $update['version'] ) ) {
@@ -879,7 +929,8 @@ final class Rest_Controller {
 					}
 
 					$name = isset( $update['name'] ) && '' !== (string) $update['name'] ? (string) $update['name'] : (string) $theme->get( 'Name' );
-					$items[] = self::theme_update_item( 'private', $slug, $name, (string) $theme->get( 'Version' ), (string) $update['version'] );
+					$package = isset( $update['download_url'] ) ? (string) $update['download_url'] : '';
+					$items[] = self::theme_update_item( 'private', $slug, $name, (string) $theme->get( 'Version' ), (string) $update['version'], $package );
 					$seen[ $slug ] = true;
 				}
 			}
@@ -905,14 +956,105 @@ final class Rest_Controller {
 	 * @param string $new_version New version.
 	 * @return array<string,string>
 	 */
-	private static function theme_update_item( $type, $slug, $name, $current, $new_version ) {
+	private static function theme_update_item( $type, $slug, $name, $current, $new_version, $package = '' ) {
 		return array(
 			'type'            => sanitize_key( $type ),
 			'slug'            => sanitize_key( $slug ),
 			'name'            => sanitize_text_field( '' !== $name ? $name : $slug ),
 			'current_version' => sanitize_text_field( $current ),
 			'new_version'     => sanitize_text_field( $new_version ),
+			'package'         => esc_url_raw( (string) $package ),
 		);
+	}
+
+	/**
+	 * Return installed themes with exclusion and update metadata.
+	 *
+	 * @param array<int,array<string,string>> $updates Theme update items.
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function theme_inventory_items( array $updates ) {
+		$updates_by_slug = array();
+		foreach ( $updates as $update ) {
+			if ( ! empty( $update['slug'] ) ) {
+				$updates_by_slug[ sanitize_key( (string) $update['slug'] ) ] = $update;
+			}
+		}
+
+		$excluded = get_option( 'marrison_excluded_themes', array() );
+		$excluded = is_array( $excluded ) ? array_map( 'sanitize_key', $excluded ) : array();
+		$items    = array();
+		foreach ( wp_get_themes() as $slug => $theme ) {
+			$slug   = sanitize_key( (string) $slug );
+			$update = isset( $updates_by_slug[ $slug ] ) ? $updates_by_slug[ $slug ] : array();
+			$items[] = array(
+				'slug'            => $slug,
+				'name'            => sanitize_text_field( (string) $theme->get( 'Name' ) ),
+				'current_version' => sanitize_text_field( (string) $theme->get( 'Version' ) ),
+				'new_version'     => sanitize_text_field( isset( $update['new_version'] ) ? (string) $update['new_version'] : '' ),
+				'type'            => sanitize_key( isset( $update['type'] ) ? (string) $update['type'] : '' ),
+				'has_update'      => ! empty( $update ),
+				'excluded'        => in_array( $slug, $excluded, true ),
+			);
+		}
+
+		usort(
+			$items,
+			static function ( $first, $second ) {
+				return strcasecmp( (string) $first['name'], (string) $second['name'] );
+			}
+		);
+
+		return array_values( $items );
+	}
+
+	/**
+	 * Return persisted update exclusions.
+	 *
+	 * @return array<string,array<int,string>>
+	 */
+	private static function update_exclusions() {
+		$plugins = get_option( 'marrison_excluded_plugins', array() );
+		$themes  = get_option( 'marrison_excluded_themes', array() );
+
+		return array(
+			'plugins' => is_array( $plugins ) ? array_values( array_map( 'sanitize_text_field', $plugins ) ) : array(),
+			'themes'  => is_array( $themes ) ? array_values( array_map( 'sanitize_key', $themes ) ) : array(),
+		);
+	}
+
+	/**
+	 * Match a theme update transient entry to Commander-authorized private metadata.
+	 *
+	 * @param mixed  $private_updates Private repository metadata.
+	 * @param string $slug            Theme directory slug.
+	 * @param string $name            Theme display name.
+	 * @param mixed  $theme           WP_Theme object when available.
+	 * @return bool
+	 */
+	private static function private_theme_update_for_slug( $private_updates, $slug, $name, $theme ) {
+		if ( ! is_array( $private_updates ) ) {
+			return false;
+		}
+
+		$textdomain = $theme && method_exists( $theme, 'get' ) ? (string) $theme->get( 'TextDomain' ) : '';
+		foreach ( $private_updates as $update ) {
+			if ( ! is_array( $update ) ) {
+				continue;
+			}
+
+			$update_slug = isset( $update['slug'] ) ? sanitize_key( (string) $update['slug'] ) : '';
+			$update_name = isset( $update['name'] ) ? (string) $update['name'] : '';
+			if (
+				( '' !== $update_slug && $update_slug === $slug )
+				|| ( '' !== $update_name && strcasecmp( $update_name, $name ) === 0 )
+				|| ( '' !== $textdomain && $textdomain === $update_slug )
+			) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

@@ -2701,6 +2701,11 @@ trait MCU_Update_Operations_Trait {
             return;
         }
 
+        $page = isset($_GET['page']) ? sanitize_key((string) $_GET['page']) : '';
+        if (strpos($page, 'marrison-updater') !== 0) {
+            return;
+        }
+
         $version = defined('MCU_PLUGIN_VERSION') ? MCU_PLUGIN_VERSION : 'unknown';
         $max_sets = $this->get_files_backup_max_sets();
         $option_value = $version . '|' . $max_sets;

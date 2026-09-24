@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.22] - 2026-09-22
+
+### Fixed
+- La riammissione remota delle esclusioni plugin espande il match sui plugin installati prima di rimuovere la voce persistente, coprendo file, slug, cartella, basename e nome plugin.
+
+## [9.8.21] - 2026-09-22
+
+### Fixed
+- `set_update_exclusion` espone conteggi non sensibili before/after/rimossi/match residui, cosi Commander puo distinguere un comando accettato da una riammissione realmente persistita.
+
+## [9.8.20] - 2026-09-22
+
+### Fixed
+- Allineata la normalizzazione di `set_update_exclusion` allo status MCU: la riammissione da Commander rimuove tutte le chiavi equivalenti che lo status considera ancora escluse.
+
+## [9.8.19] - 2026-09-22
+
+### Fixed
+- Corretta la riattivazione dalla UI MCU quando l'esclusione era stata salvata da Commander come file plugin: la rimozione usa ora chiavi equivalenti slug/file/nome.
+
+## [9.8.18] - 2026-09-22
+
+### Fixed
+- Corretta la riattivazione remota delle esclusioni update da Commander: `excluded=0` viene trattato come richiesta valida di riammissione, non come valore mancante.
+
+## [9.8.17] - 2026-09-22
+
+### Added
+- Aggiunta l'operazione remota firmata `set_update_exclusion`, cosi Commander puo modificare in tempo reale le esclusioni persistenti MCU per plugin e temi senza mantenere una lista separata.
+- Lo status MCU espone inventario leggero di plugin e temi installati con stato update/esclusione, usato da Commander per mostrare una tab dedicata alle esclusioni.
+
+## [9.8.16] - 2026-09-22
+
+### Fixed
+- Lo status MCU classifica come `private` i temi autorizzati dal repository privato anche quando sono gia presenti nel transient WordPress `update_themes`, evitando che Commander li tratti come temi WordPress.org.
+- L'operazione remota `update_theme` preferisce il pacchetto del repository privato quando lo slug/nome/textdomain corrisponde a un tema privato, anche se il payload remoto arriva con sorgente ambigua o legacy.
+- Rimosse attivita ricorrenti non necessarie fuori da interrogazioni esplicite, pagine MCU, REST Commander e cron pianificati: niente repair schedule a ogni `init` e niente ricalcolo/fetch conteggi update a ogni `admin_init`.
+
 ## [9.8.15] - 2026-09-16
 
 ### Added

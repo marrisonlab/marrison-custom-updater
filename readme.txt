@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.15
+Stable tag: 9.8.22
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -35,6 +35,30 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.22 =
+* **Fix**: La riammissione remota delle esclusioni plugin espande il match usando i plugin installati, cosi file, slug, cartella, basename e nome reale rimuovono la stessa esclusione persistente.
+
+= 9.8.21 =
+* **Fix/Diagnostica**: `set_update_exclusion` restituisce conteggi before/after/rimossi/match residui per verificare in Commander se una riammissione ha modificato davvero le esclusioni persistenti.
+
+= 9.8.20 =
+* **Fix**: L'endpoint remoto `set_update_exclusion` usa la stessa normalizzazione dello status MCU, evitando che una chiave equivalente resti esclusa dopo la riammissione da Commander.
+
+= 9.8.19 =
+* **Fix**: La riattivazione dalla UI MCU rimuove anche le esclusioni plugin salvate da Commander come file plugin, riallineando subito lo status letto da Commander.
+
+= 9.8.18 =
+* **Fix**: La riattivazione da Commander delle esclusioni update interpreta correttamente `excluded=0` e rimuove l'elemento dalle esclusioni persistenti MCU.
+
+= 9.8.17 =
+* **Nuovo**: Operazione remota firmata `set_update_exclusion` per sincronizzare in tempo reale da Commander le esclusioni persistenti MCU.
+* **Nuovo**: Lo status MCU espone inventario leggero plugin/temi con stato update ed esclusione.
+
+= 9.8.16 =
+* **Fix**: Lo status MCU classifica come privati i temi autorizzati dal repository privato anche quando sono gia nel transient WordPress `update_themes`, evitando falsi update WordPress.org da Commander.
+* **Fix**: L'operazione remota `update_theme` preferisce il pacchetto privato quando slug, nome o textdomain corrispondono al repository temi MCU.
+* **Cambiamento**: Ridotte le attivita a riposo: niente repair schedule a ogni `init` e niente ricalcolo conteggi update a ogni `admin_init`.
 
 = 9.8.15 =
 * **Nuovo**: Aggiunta l'operazione remota firmata `update_theme`, cosi Marrison Commander puo aggiornare un singolo tema tramite MCU.
