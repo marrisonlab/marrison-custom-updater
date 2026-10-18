@@ -205,6 +205,8 @@ final class Actions_Controller {
 			$payload = self::cancel_master_update();
 		} elseif ( 'diagnostics_schedule_snapshot' === $operation ) {
 			$payload = self::schedule_diagnostic_snapshot();
+		} elseif ( 'remove_plugin' === $operation ) {
+			$payload = apply_filters( 'mcu_remote_remove_plugin', array( 'success' => false, 'error_code' => 'remove_plugin_unavailable', 'message' => 'Rimozione plugin non disponibile.' ), $parameters );
 		} elseif ( 'update_plugin' === $operation ) {
 			$payload = self::update_plugin( $parameters );
 		} elseif ( 'update_theme' === $operation ) {
@@ -315,6 +317,12 @@ final class Actions_Controller {
 					'allowed_params' => array(),
 					'timeout'        => 30,
 					'schema_version' => 1,
+				),
+				'remove_plugin' => array(
+					'type' => 'write', 'cost_class' => 'moderate',
+					'required' => array( 'plugin_file', 'expected_fingerprint' ),
+					'allowed_params' => array( 'plugin_file', 'expected_fingerprint' ),
+					'timeout' => 120, 'schema_version' => 1,
 				),
 				'update_plugin' => array(
 					'type'           => 'write',
@@ -1326,6 +1334,9 @@ final class Actions_Controller {
 				is_array( $last_log ) ? $last_log : array(),
 				$repository_ready
 			);
+			// The updater clears caches on completion. Rebuild them before a
+			// terminal success or callback can make Commander show a green site.
+			$outcome = self::verify_update_outcome( $outcome );
 
 			$final_status = array_merge(
 				self::current_update_status(),
@@ -1364,6 +1375,36 @@ final class Actions_Controller {
 	 *
 	 * @return array<string,mixed> Availability report: ok, plugins, themes.
 	 */
+	private static function verify_update_outcome( array $outcome ) {
+		$verification = self::force_update_sync( 'post_update' );
+		if ( empty( $verification['success'] ) ) {
+			return array( 'status' => 'failed', 'stage' => 'verification_failed',
+				'message' => ( 'failed' === $outcome['status'] ? $outcome['message'] . ' ' : '' ) . $verification['message'] );
+		}
+		$fresh_status = Rest_Controller::collect_status();
+		if ( empty( $fresh_status['updates_data_fresh'] ) ) {
+			return array( 'status' => 'failed', 'stage' => 'verification_failed', 'message' => 'Verifica finale incompleta: dati aggiornamenti mancanti o non aggiornati.' );
+		}
+		// Core installation is a separate WordPress flow.
+		$remaining = (int) $fresh_status['plugin_updates_count'] + (int) $fresh_status['theme_updates_count'] + (int) $fresh_status['translation_updates_count'];
+		if ( $remaining > 0 ) {
+			$details = array();
+			foreach ( array( 'plugin_updates', 'theme_updates' ) as $key ) {
+				foreach ( isset( $fresh_status[ $key ] ) && is_array( $fresh_status[ $key ] ) ? $fresh_status[ $key ] : array() as $item ) {
+					if ( count( $details ) >= 5 ) { break; }
+					$details[] = sanitize_text_field( (string) ( isset( $item['name'] ) ? $item['name'] : '' ) )
+						. ' (' . sanitize_text_field( (string) ( isset( $item['current_version'] ) ? $item['current_version'] : '?' ) )
+						. ' -> ' . sanitize_text_field( (string) ( isset( $item['new_version'] ) ? $item['new_version'] : '?' ) ) . ')';
+				}
+			}
+			return array( 'status' => 'failed', 'stage' => 'verification_failed',
+				'message' => ( 'failed' === $outcome['status'] ? $outcome['message'] . ' ' : '' )
+					. sprintf( 'Dopo la sincronizzazione forzata restano %d aggiornamenti di plugin, temi o traduzioni.', $remaining )
+					. ( $details ? ' ' . implode( '; ', $details ) . '.' : '' ) );
+		}
+		return $outcome;
+	}
+
 	private static function prepare_repository_metadata_for_update() {
 		delete_transient( 'marrison_updates_fetch_failed' );
 		delete_transient( 'marrison_theme_updates_fetch_failed' );
@@ -2030,7 +2071,10 @@ final class Actions_Controller {
 	 *
 	 * @return array<string,mixed>
 	 */
-	private static function force_update_sync() {
+	public static function force_update_sync( $source = 'commander' ) {
+		if ( ! Settings::repository_config_managed() ) {
+			return array( 'success' => false, 'error_code' => 'client_not_authorized', 'message' => 'Client MCU non autorizzato.' );
+		}
 		$lock = self::current_update_lock_status();
 		if ( ! empty( $lock['locked'] ) ) {
 			return array(
@@ -2041,8 +2085,61 @@ final class Actions_Controller {
 			);
 		}
 
+		$previous_lock = get_option( 'mcu_update_sync_lock', array() );
+		if ( is_array( $previous_lock ) && ! empty( $previous_lock['expires_at'] ) && (int) $previous_lock['expires_at'] < time() ) {
+			delete_option( 'mcu_update_sync_lock' );
+		}
+		$token = wp_generate_uuid4();
+		if ( ! add_option( 'mcu_update_sync_lock', array( 'token' => $token, 'expires_at' => time() + 180 ), '', false ) ) {
+			return array( 'success' => false, 'error_code' => 'sync_in_progress', 'message' => 'Sincronizzazione aggiornamenti gia in corso.' );
+		}
+		$started = time();
+		$previous = get_option( 'mcu_update_sync_status', array() );
+		$previous = is_array( $previous ) ? $previous : array();
+		update_option( 'mcu_update_sync_status', array(
+			'attempted_at' => $started, 'last_success_at' => isset( $previous['last_success_at'] ) ? (int) $previous['last_success_at'] : 0,
+			'status' => 'running', 'source' => sanitize_key( $source ), 'message' => 'Sincronizzazione aggiornamenti in corso.',
+		), false );
+		$http_results = array();
+		$observer = static function ( $response, $context, $transport, $args, $url ) use ( &$http_results ) {
+			if ( 'response' !== $context || 'api.wordpress.org' !== wp_parse_url( $url, PHP_URL_HOST ) ) { return; }
+			if ( ! preg_match( '~/(plugins|themes|core)/(?:update-check|version-check)/~', (string) wp_parse_url( $url, PHP_URL_PATH ), $match ) ) { return; }
+			$key = 'core' === $match[1] ? 'offers' : $match[1];
+			$body = is_wp_error( $response ) ? null : json_decode( (string) wp_remote_retrieve_body( $response ), true );
+			$http_results[ $match[1] ] = ! is_wp_error( $response ) && 200 === (int) wp_remote_retrieve_response_code( $response )
+				&& is_array( $body ) && isset( $body[ $key ] ) && is_array( $body[ $key ] );
+		};
+		add_action( 'http_api_debug', $observer, 10, 5 );
+		try {
+			$result = self::refresh_update_metadata( $started, $http_results );
+		} catch ( \Throwable $exception ) {
+			$result = array( 'success' => false, 'error_code' => 'update_sync_failed', 'message' => 'Sincronizzazione interrotta: impossibile verificare gli aggiornamenti.' );
+		} finally {
+			remove_action( 'http_api_debug', $observer, 10 );
+		}
+		$state = array(
+			'attempted_at' => $started, 'completed_at' => time(),
+			'last_success_at' => ! empty( $result['success'] ) ? time() : ( isset( $previous['last_success_at'] ) ? (int) $previous['last_success_at'] : 0 ),
+			'status' => ! empty( $result['success'] ) ? 'completed' : 'failed', 'source' => sanitize_key( $source ),
+			'message' => $result['message'], 'error_code' => isset( $result['error_code'] ) ? $result['error_code'] : '',
+		);
+		try {
+			update_option( 'mcu_update_sync_status', $state, false );
+			return array_merge( $result, array( 'sync' => $state ) );
+		} finally {
+			$current_lock = get_option( 'mcu_update_sync_lock', array() );
+			if ( isset( $current_lock['token'] ) && $token === $current_lock['token'] ) { delete_option( 'mcu_update_sync_lock' ); }
+		}
+	}
+
+	/** Refresh all sources, and require positive evidence before declaring success. */
+	private static function refresh_update_metadata( $started, array &$http_results ) {
 		@set_time_limit( 120 );
 		self::clear_update_caches();
+		delete_transient( 'marrison_updater_github_version' );
+		delete_transient( 'marrison_github_fetch_failed' );
+		if ( function_exists( 'wp_clean_plugins_cache' ) ) { wp_clean_plugins_cache( false ); }
+		if ( function_exists( 'wp_clean_themes_cache' ) ) { wp_clean_themes_cache( false ); }
 
 		if ( file_exists( ABSPATH . WPINC . '/update.php' ) ) {
 			require_once ABSPATH . WPINC . '/update.php';
@@ -2064,6 +2161,20 @@ final class Actions_Controller {
 		$private_plugins = self::fetch_private_repo_updates( 'plugin' );
 		$private_themes  = self::fetch_private_repo_updates( 'theme' );
 		self::inject_private_theme_updates( $private_themes );
+		$github_version = apply_filters( 'mcu_refresh_self_update', false );
+		$errors = array();
+		foreach ( array( 'plugins' => 'update_plugins', 'themes' => 'update_themes', 'core' => 'update_core' ) as $kind => $cache_key ) {
+			$value = get_site_transient( $cache_key );
+			if ( empty( $http_results[ $kind ] ) || ! is_object( $value ) || empty( $value->last_checked ) || (int) $value->last_checked < $started ) {
+				$errors[] = 'WordPress.org (' . $kind . ')';
+			}
+		}
+		if ( false !== get_transient( 'marrison_updates_fetch_failed' ) ) { $errors[] = 'repository plugin'; }
+		if ( false !== get_transient( 'marrison_theme_updates_fetch_failed' ) ) { $errors[] = 'repository temi'; }
+		if ( ! $github_version ) { $errors[] = 'versione MCU su GitHub'; }
+		if ( $errors ) {
+			return array( 'success' => false, 'error_code' => 'update_sync_failed', 'message' => 'Ricerca aggiornamenti incompleta: ' . implode( ', ', $errors ) . '. Nuovo tentativo necessario.' );
+		}
 
 		if ( file_exists( ABSPATH . 'wp-admin/includes/translation-install.php' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/translation-install.php';

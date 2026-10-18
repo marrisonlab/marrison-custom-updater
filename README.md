@@ -1,6 +1,28 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.13-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.24-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+
+## Verifica giornaliera degli aggiornamenti (9.8.24)
+
+In **Impostazioni > Generale > Verifica aggiornamenti** si abilita la ricerca
+giornaliera e si sceglie l'orario, inizialmente **03:00 Europe/Rome**. L'operazione
+ricostruisce le cache WordPress/plugin/temi/traduzioni, i repository privati e la
+versione MCU, senza installare aggiornamenti. Le installazioni mantengono la loro
+programmazione separata. Sono visibili ultimo tentativo, ultima sincronizzazione
+riuscita, prossimo evento e messaggio dell'esito; un errore viene ritentato dopo
+15 minuti. Le fonti devono rispondere correttamente: uno zero da cache mancanti
+o una ricerca incompleta non certificano che il sito sia aggiornato.
+
+WP-Cron richiede richieste al sito. Per rispettare l'orario anche senza visite,
+configurare nell'hosting un cron che esegua `wp-cron.php` ogni 5 minuti, oppure
+usare il monitor sul server Commander 1.5.12, che richiama direttamente la sync
+autenticata. I due percorsi condividono la stessa routine e impediscono sync
+concorrenti. La programmazione locale e quella centrale hanno controlli separati.
+
+La conclusione dei job Master ricostruisce nuovamente i dati prima del callback:
+aggiornamenti residui o errori della ricerca producono un fallimento esplicito.
+Fixture locale: `php tests/update-verification-regression.php`. La configurazione
+del cron dell'hosting e la verifica su siti reali restano operazioni di deployment.
 [![WordPress Version](https://img.shields.io/badge/WordPress-6.0%2B-green.svg)](https://wordpress.org)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-green.svg)](https://php.net)
 [![License](https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -8,6 +30,15 @@
 **Marrison Custom Updater** è una soluzione avanzata per gestire aggiornamenti di plugin e temi privati in WordPress. Permette di collegare il tuo sito WordPress a un repository personalizzato, consentendo di distribuire aggiornamenti per i tuoi plugin e temi proprietari con la stessa facilità di quelli ufficiali di WordPress.org.
 
 ## ✨ Funzionalità Principali
+
+Commander 1.5.9 puo analizzare su comando i metadati dei plugin, condividere le
+valutazioni per versione/impronta e gestire una whitelist. Dopo questo aggiornamento
+eseguire **Verifica connessione** in Commander per acquisire il nuovo inventario.
+La rimozione esplicita di un plugin segnalato usa HMAC e il lock aggiornamenti MCU:
+elimina soltanto i file del plugin dopo averne verificato identita e percorsi,
+senza eseguirne gli script di disinstallazione. Dati e opzioni restano nel database.
+Non supporta multisito, link simbolici, cartelle condivise o dipendenze dichiarate;
+MCU stesso e protetto. Non e una bonifica completa del sito.
 
 - 🔄 **Repository Privato**: Collega il tuo sito a una fonte esterna per ricevere aggiornamenti per plugin e temi non presenti nella directory ufficiale
 - 📦 **Gestione Aggiornamenti Unificata**: Visualizza e installa aggiornamenti per plugin e temi privati direttamente dalla dashboard

@@ -26,10 +26,12 @@ final class Plugin {
 		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-actions-controller.php';
 		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-dashboard-access-controller.php';
 		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-diagnostics-scheduler.php';
+		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-update-verification.php';
 		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-rest-controller.php';
 		Actions_Controller::init();
 		Dashboard_Access_Controller::init();
 		Diagnostics_Scheduler::init();
+		Update_Verification::init();
 
 		add_action( 'rest_api_init', array( __CLASS__, 'register_rest_routes' ) );
 		// Enforce the inactive state on frontend, admin and WP-Cron requests.
@@ -83,6 +85,8 @@ final class Plugin {
 				'mcu_master_update_event',
 				'mcu_diagnostics_start_snapshot',
 				'mcu_diagnostics_collect_module',
+				'mcu_update_verification',
+				'mcu_update_verification_retry',
 			) as $hook
 		) {
 			self::clear_scheduled_hook( $hook );

@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.22
+Stable tag: 9.8.24
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -13,6 +13,17 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 
 == Description ==
+
+MCU 9.8.24 aggiunge la verifica giornaliera con sincronizzazione forzata e orario
+configurabile in Impostazioni > Generale. Per eseguirla anche senza visite, il
+cron dell'hosting deve richiamare wp-cron.php ogni 5 minuti, oppure si puo usare
+il monitor pianificato di Commander 1.5.12. Gli errori richiedono un nuovo tentativo
+dopo 15 minuti; la chiusura dei job verifica nuovamente gli aggiornamenti residui.
+
+MCU 9.8.23 aggiunge metadati e impronta del file principale per l'analisi manuale
+dei plugin in Commander 1.5.9. Rimozione remota esplicita con HMAC, identita attesa,
+lock aggiornamenti e verifica dei file; non esegue script del plugin e conserva
+i dati nel database. Eseguire Verifica connessione in Commander dopo l'aggiornamento.
 
 **Marrison Custom Updater** è una soluzione avanzata per gestire aggiornamenti di plugin e temi privati in WordPress. Permette di collegare il tuo sito WordPress a un repository personalizzato, consentendo di distribuire aggiornamenti per i tuoi plugin e temi proprietari con la stessa facilità di quelli ufficiali di WordPress.org.
 
@@ -36,7 +47,12 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 == Changelog ==
 
-= 9.8.22 =
+= 9.8.24 =
+* Verifica giornaliera con orario Europe/Rome configurabile, sync forzata, esiti persistenti e retry dopo 15 minuti.
+* Controllo effettivo delle fonti aggiornamenti e verifica forzata dopo i job Master: aggiornamenti residui o errori impediscono il falso completamento.
+* Per eseguire la verifica senza traffico serve il cron dell'hosting o il monitor pianificato di Commander.
+
+= 9.8.23 =
 * **Fix**: La riammissione remota delle esclusioni plugin espande il match usando i plugin installati, cosi file, slug, cartella, basename e nome reale rimuovono la stessa esclusione persistente.
 
 = 9.8.21 =

@@ -93,7 +93,7 @@ final class Rest_Controller {
 	 *
 	 * @return array<string,mixed>
 	 */
-	private static function collect_status() {
+	public static function collect_status() {
 		if ( ! function_exists( 'get_plugins' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
@@ -124,12 +124,18 @@ final class Rest_Controller {
 		$translation_count   = count( $translation_items );
 		$mcu_update_count    = self::plugin_update_type_count( $plugin_update_items, 'private' );
 		$total_update_count  = $plugin_update_count + $theme_update_count + $translation_count + $core_update_count;
-		$last_checked        = max(
+		$last_checked        = min(
 			self::transient_last_checked( $plugin_updates ),
 			self::transient_last_checked( $theme_updates ),
 			self::transient_last_checked( $core_updates )
 		);
-		$updates_fresh       = $last_checked > 0 && ( time() - $last_checked ) < 12 * HOUR_IN_SECONDS;
+		$sync_status = get_option( 'mcu_update_sync_status', array() );
+		$sync_status = is_array( $sync_status ) ? $sync_status : array();
+		$updates_fresh       = $last_checked > 0 && ( time() - $last_checked ) < 26 * HOUR_IN_SECONDS
+			&& 'completed' === ( isset( $sync_status['status'] ) ? $sync_status['status'] : '' )
+			&& false === get_transient( 'marrison_updates_fetch_failed' )
+			&& false === get_transient( 'marrison_theme_updates_fetch_failed' )
+			&& false === get_transient( 'marrison_github_fetch_failed' );
 		$next_scheduled_run  = self::next_scheduled_update_run();
 		$mcu_frequency       = self::mcu_update_frequency();
 		$mcu_month_day       = self::mcu_update_month_day();
@@ -179,6 +185,9 @@ final class Rest_Controller {
 			'updates_data_fresh'         => $updates_fresh,
 			'updates_may_be_stale'       => ! $updates_fresh,
 			'updates_last_checked_at'    => $last_checked,
+			'update_sync'                => $sync_status,
+			'update_verification_time'   => Update_Verification::time(),
+			'update_verification_next'   => (int) wp_next_scheduled( Update_Verification::HOOK ),
 			'last_wordpress_cron'        => null,
 			'mcu_auto_update_enabled'    => 'yes' === get_option( 'marrison_auto_update_enabled' ),
 			'mcu_update_frequency'       => $mcu_frequency,
@@ -216,7 +225,7 @@ final class Rest_Controller {
 		} catch ( \Throwable $exception ) {
 			return array(
 				'supported_read_operations'  => array(),
-				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'set_update_exclusion', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
+				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'remove_plugin', 'set_update_exclusion', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
 				'snapshot'                   => array(
 					'available' => false,
 					'status'    => 'unavailable',
@@ -512,6 +521,7 @@ final class Rest_Controller {
 	 * @return array<int,array<string,mixed>>
 	 */
 	private static function plugin_inventory_items( array $plugins, array $updates ) {
+		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-plugin-security.php';
 		$updates_by_file = array();
 		foreach ( $updates as $update ) {
 			if ( ! empty( $update['file'] ) ) {
@@ -525,7 +535,7 @@ final class Rest_Controller {
 			$slug   = self::plugin_update_slug( $file, null );
 			$name   = isset( $data['Name'] ) && '' !== $data['Name'] ? (string) $data['Name'] : $slug;
 			$update = isset( $updates_by_file[ $file ] ) ? $updates_by_file[ $file ] : array();
-			$items[] = array(
+			$items[] = array_merge( array(
 				'file'            => sanitize_text_field( $file ),
 				'slug'            => sanitize_key( $slug ),
 				'name'            => sanitize_text_field( $name ),
@@ -534,7 +544,7 @@ final class Rest_Controller {
 				'type'            => sanitize_key( isset( $update['type'] ) ? (string) $update['type'] : '' ),
 				'has_update'      => ! empty( $update ),
 				'excluded'        => self::is_plugin_update_excluded( $slug, $file, $name, null ),
-			);
+			), Plugin_Security::metadata( $file, $data ) );
 		}
 
 		usort(

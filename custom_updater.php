@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.22
+ * Version: 9.8.24
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.22');
+    define('MCU_PLUGIN_VERSION', '9.8.24');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -80,7 +80,9 @@ class MCU_Custom_Updater {
         add_action('admin_post_mcu_clear_update_lock', [$this, 'mcu_clear_update_lock_admin_action']);
         add_action('admin_post_marrison_force_check_mcu', [$this, 'force_check_mcu']);
         add_filter('mcu_remote_update_plugin', [$this, 'mcu_remote_update_plugin'], 10, 2);
+        add_filter('mcu_remote_remove_plugin', [$this, 'mcu_remote_remove_plugin'], 10, 2);
         add_filter('mcu_remote_update_theme', [$this, 'mcu_remote_update_theme'], 10, 2);
+        add_filter('mcu_refresh_self_update', [$this, 'mcu_refresh_self_update']);
         
         add_action('admin_post_marrison_download_repo_file', [$this, 'download_repo_file']);
         add_action('admin_post_marrison_download_theme_repo_file', [$this, 'download_theme_repo_file']);
@@ -963,11 +965,21 @@ class MCU_Custom_Updater {
         }
 
         $body = json_decode(wp_remote_retrieve_body($response), true);
-        if (empty($body['tag_name'])) return false;
+        if (200 !== (int) wp_remote_retrieve_response_code($response) || empty($body['tag_name'])) return false;
 
         $version = str_replace('v', '', $body['tag_name']);
         set_transient('marrison_updater_github_version', $version, 6 * HOUR_IN_SECONDS);
 
+        return $version;
+    }
+
+    public function mcu_refresh_self_update() {
+        $version = $this->get_github_version();
+        if (!$version) return false;
+        $transient = get_site_transient('update_plugins');
+        if (!is_object($transient)) $transient = new stdClass();
+        $this->check_self_update($transient);
+        set_site_transient('update_plugins', $transient);
         return $version;
     }
 
@@ -1515,6 +1527,19 @@ echo json_encode($data);
             wp_send_json_error($result->get_error_message());
         } else {
             wp_send_json_error('Errore durante l\'aggiornamento del plugin');
+        }
+    }
+
+    public function mcu_remote_remove_plugin($response, $parameters) {
+        $lock = $this->mcu_acquire_update_lock('commander_remove_plugin');
+        if (is_wp_error($lock)) {
+            return ['success' => false, 'error_code' => 'update_lock_active', 'message' => $lock->get_error_message()];
+        }
+        try {
+            require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-plugin-security.php';
+            return \MarrisonCustomUpdater\MaintenanceClient\Plugin_Security::remove(is_array($parameters) ? $parameters : []);
+        } finally {
+            $this->mcu_release_update_lock($lock);
         }
     }
 

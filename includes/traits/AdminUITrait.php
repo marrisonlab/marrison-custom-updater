@@ -457,6 +457,7 @@ JS
                 <div class="mcu-notice mcu-notice-success"><span class="dashicons dashicons-yes"></span> <?php esc_html_e('Aggiornamento bloccato interrotto e lock rimosso.', 'marrison-custom-updater'); ?></div>
             <?php endif; ?>
             <?php if ($active_tab == 'general'): ?>
+                <?php \MarrisonCustomUpdater\MaintenanceClient\Update_Verification::render_settings(); ?>
                 <div class="mcu-card">
                     <div class="mcu-card-header">
                         <h2 class="mcu-card-title"><span class="dashicons dashicons-database"></span> <?php esc_html_e('Impostazioni Repository', 'marrison-custom-updater'); ?></h2>

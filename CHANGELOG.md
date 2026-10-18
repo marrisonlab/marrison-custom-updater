@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.24] - 2026-10-18
+
+### Added
+- Verifica giornaliera con sincronizzazione forzata e orario configurabile in Impostazioni > Generale (03:00 Europe/Rome iniziale), distinta dalla programmazione delle installazioni.
+- Ultimo tentativo, ultima sincronizzazione riuscita, prossimo evento ed errori visibili nelle impostazioni; retry dopo 15 minuti e blocco delle sincronizzazioni concorrenti.
+
+### Fixed
+- La sincronizzazione controlla le risposte effettive di WordPress.org, repository privati e GitHub MCU; cache vuote, errori HTTP e JSON non valido non producono un falso successo.
+- Prima della chiusura dei job Master, nuova ricerca forzata: aggiornamenti residui o verifica incompleta rendono il job fallito con un messaggio esplicito.
+- Freschezza basata su tutte le fonti e sull'ultima sincronizzazione riuscita. Revoca/disattivazione rimuovono anche gli eventi di verifica.
+
+## [9.8.23] - 2026-10-17
+
+### Added
+- Inventario Commander con descrizione, autore, provenienza e SHA-256 del file principale. L'impronta identifica una versione per il registro e la whitelist; non certifica l'intero plugin.
+- Operazione HMAC `remove_plugin`, solo su comando esplicito, con identita attesa e lock aggiornamenti esistente. Verifica finale dell'assenza dei file; nessuno script di disattivazione/disinstallazione del plugin viene eseguito.
+- Rimozione bloccata per multisito, modifiche file disabilitate, MCU stesso, percorsi esterni/link simbolici, cartelle condivise e dipendenze dichiarate. Dati/opzioni del plugin conservati.
+
 ## [9.8.22] - 2026-09-22
 
 ### Fixed
