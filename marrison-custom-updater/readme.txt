@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.24
+Stable tag: 9.8.26
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -13,6 +13,18 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 
 == Description ==
+
+MCU 9.8.26 corregge i falsi errori WordPress.org quando le risposte HTTP valide
+passano dai filtri WordPress. Gli errori reali restano bloccanti e il messaggio
+indica per ogni fonte codice HTTP/errore di trasporto, risposta non osservata o
+non valida oppure metadati non aggiornati.
+
+MCU 9.8.25 conserva un solo backup di wp-config.php a ogni attivazione e
+disattivazione del debug. Alla prima richiesta WordPress dopo l'aggiornamento
+elimina le copie debug MCU/Marrison accumulate, mantenendo la piu recente.
+Gli errori di pulizia bloccano il comando debug con un messaggio esplicito;
+la pulizia iniziale fallita viene ritentata dopo cinque minuti alla successiva
+richiesta. Gli altri backup e il config attivo non vengono modificati dalla pulizia.
 
 MCU 9.8.24 aggiunge la verifica giornaliera con sincronizzazione forzata e orario
 configurabile in Impostazioni > Generale. Per eseguirla anche senza visite, il
@@ -46,6 +58,18 @@ i dati nel database. Eseguire Verifica connessione in Commander dopo l'aggiornam
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.26 =
+* Verifica WordPress.org compatibile con risposte HTTP filtrate, senza falsi errori simultanei per plugin, temi e core.
+* Risposte normali validate dopo i filtri; errori reali e dati obsoleti continuano a impedire il verde.
+* Causa specifica per fonte nei messaggi di sincronizzazione, senza body, intestazioni o chiavi.
+
+= 9.8.25 =
+* Plugin raccolto nella sottocartella omonima del repository; test, documentazione del repository e ZIP restano nella cartella principale. Primo aggiornamento dalle versioni precedenti tramite ZIP installabile.
+* Updater compatibile sia con lo ZIP del solo plugin sia con gli archivi GitHub con sottocartella.
+* Un solo backup di wp-config.php sia in attivazione sia in disattivazione del debug, anche se la scrittura del config fallisce.
+* Pulizia automatica delle vecchie copie debug MCU/Marrison alla prima richiesta WordPress dopo l'aggiornamento: resta la piu recente.
+* Errori di pulizia segnalati e cambio debug annullato; niente accumulo ai successivi tentativi. Retry della pulizia iniziale dopo cinque minuti alla successiva richiesta.
 
 = 9.8.24 =
 * Verifica giornaliera con orario Europe/Rome configurabile, sync forzata, esiti persistenti e retry dopo 15 minuti.

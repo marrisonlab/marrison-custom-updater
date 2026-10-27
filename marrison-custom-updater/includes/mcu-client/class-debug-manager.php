@@ -16,11 +16,34 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class Debug_Manager {
 	const OPTION_LAST_CONFIG_BACKUP = 'mcu_remote_debug_last_config_backup';
+	const OPTION_BACKUP_CLEANUP     = 'mcu_debug_backup_cleanup_v1';
 	const CONFIG_BLOCK_START        = '// BEGIN Marrison Commander Debug';
 	const CONFIG_BLOCK_END          = '// END Marrison Commander Debug';
 	const VIEW_MAX_BYTES            = 524288;
 	const AI_MAX_BYTES              = 131072;
 	const DOWNLOAD_MAX_BYTES        = 2097152;
+
+	/**
+	 * Remove accumulated backups once after upgrade, retrying failures later.
+	 *
+	 * @return void
+	 */
+	public static function maybe_cleanup_config_backups() {
+		$state = get_option( self::OPTION_BACKUP_CLEANUP, array() );
+		if ( ! empty( $state['completed'] ) || ( ! empty( $state['retry_after'] ) && time() < (int) $state['retry_after'] ) ) {
+			return;
+		}
+
+		$cleanup = self::prune_config_backups();
+		update_option(
+			self::OPTION_BACKUP_CLEANUP,
+			array(
+				'completed'   => ! empty( $cleanup['success'] ),
+				'retry_after' => ! empty( $cleanup['success'] ) ? 0 : time() + 300,
+			),
+			false
+		);
+	}
 
 	/**
 	 * Return lightweight debug status metadata.
@@ -75,18 +98,13 @@ final class Debug_Manager {
 			return $result;
 		}
 
-		$backup_cleanup = array();
-		if ( ! $enabled ) {
-			$backup_cleanup = self::prune_config_backups();
-		}
-
 		return array(
 			'success'        => true,
 			'message'        => $enabled
 				? __( 'Debug WordPress attivato.', 'marrison-custom-updater' )
 				: __( 'Debug WordPress disattivato.', 'marrison-custom-updater' ),
 			'debug'          => self::status_summary(),
-			'backup_cleanup' => $backup_cleanup,
+			'backup_cleanup' => $result['backup_cleanup'],
 		);
 	}
 
@@ -210,13 +228,35 @@ final class Debug_Manager {
 			);
 		}
 
-		$backup = $path . '.mcu-debug-backup-' . gmdate( 'YmdHis' );
+		// Do not create another backup while older copies cannot be removed.
+		$cleanup = self::prune_config_backups();
+		if ( empty( $cleanup['success'] ) ) {
+			return self::backup_cleanup_error( $cleanup );
+		}
+
+		// Repeated commands in the same second must not overwrite the recovery copy.
+		$backup_time = time();
+		do {
+			$backup = $path . '.mcu-debug-backup-' . gmdate( 'YmdHis', $backup_time++ );
+		} while ( file_exists( $backup ) || is_link( $backup ) );
 		if ( ! @copy( $path, $backup ) ) {
+			// copy() can leave an incomplete destination on a failed write.
+			if ( is_file( $backup ) ) {
+				@unlink( $backup );
+			}
 			return array(
 				'success'    => false,
 				'error_code' => 'wp_config_backup_failed',
 				'message'    => __( 'Impossibile creare il backup di wp-config.php. Cambio annullato.', 'marrison-custom-updater' ),
 			);
+		}
+
+		// Enforce retention before writing, even if the config write later fails.
+		$previous_deleted = $cleanup['deleted'];
+		$cleanup = self::prune_config_backups( $backup );
+		$cleanup['deleted'] += $previous_deleted;
+		if ( empty( $cleanup['success'] ) ) {
+			return self::backup_cleanup_error( $cleanup );
 		}
 
 		$content = self::remove_managed_config_block( $content );
@@ -253,20 +293,38 @@ final class Debug_Manager {
 		update_option( self::OPTION_LAST_CONFIG_BACKUP, $backup, false );
 
 		return array(
-			'success' => true,
-			'message' => '',
+			'success'        => true,
+			'message'        => '',
+			'backup_cleanup' => $cleanup,
+		);
+	}
+
+	/**
+	 * Report retention errors without claiming the debug change succeeded.
+	 *
+	 * @param array<string,mixed> $cleanup Cleanup result.
+	 * @return array<string,mixed>
+	 */
+	private static function backup_cleanup_error( array $cleanup ) {
+		return array(
+			'success'        => false,
+			'error_code'     => 'wp_config_backup_cleanup_failed',
+			'message'        => __( 'Impossibile eliminare i vecchi backup debug di wp-config.php. Controllare i permessi della cartella. Cambio debug annullato.', 'marrison-custom-updater' ),
+			'backup_cleanup' => $cleanup,
 		);
 	}
 
 	/**
 	 * Keep only the newest wp-config.php debug backup.
 	 *
+	 * @param string $keep Backup just created, which must be preserved.
 	 * @return array<string,mixed>
 	 */
-	private static function prune_config_backups() {
+	private static function prune_config_backups( $keep = '' ) {
 		$config_path = self::wp_config_path();
 		if ( '' === $config_path ) {
 			return array(
+				'success' => false,
 				'deleted' => 0,
 				'kept'    => '',
 			);
@@ -274,9 +332,10 @@ final class Debug_Manager {
 
 		$directory = dirname( $config_path );
 		$basename  = basename( $config_path );
-		$entries   = is_dir( $directory ) ? scandir( $directory ) : false;
+		$entries   = is_dir( $directory ) ? @scandir( $directory ) : false;
 		if ( ! is_array( $entries ) ) {
 			return array(
+				'success' => false,
 				'deleted' => 0,
 				'kept'    => '',
 			);
@@ -290,7 +349,7 @@ final class Debug_Manager {
 			}
 
 			$path = trailingslashit( $directory ) . $entry;
-			if ( ! is_file( $path ) ) {
+			if ( ! is_file( $path ) || is_link( $path ) ) {
 				continue;
 			}
 
@@ -308,6 +367,7 @@ final class Debug_Manager {
 			}
 
 			return array(
+				'success' => true,
 				'deleted' => 0,
 				'kept'    => $kept,
 			);
@@ -325,20 +385,28 @@ final class Debug_Manager {
 			}
 		);
 
-		$kept    = (string) $backups[0]['path'];
+		$kept    = '' !== $keep ? $keep : (string) $backups[0]['path'];
 		$deleted = 0;
-		foreach ( array_slice( $backups, 1 ) as $backup ) {
+		$failed  = 0;
+		foreach ( $backups as $backup ) {
 			$path = (string) $backup['path'];
+			if ( $path === $kept ) {
+				continue;
+			}
 			if ( @unlink( $path ) ) {
 				$deleted++;
+			} else {
+				$failed++;
 			}
 		}
 
 		update_option( self::OPTION_LAST_CONFIG_BACKUP, $kept, false );
 
 		return array(
+			'success' => 0 === $failed,
 			'deleted' => $deleted,
 			'kept'    => $kept,
+			'failed'  => $failed,
 		);
 	}
 

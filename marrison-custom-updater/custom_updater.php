@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.24
+ * Version: 9.8.26
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.24');
+    define('MCU_PLUGIN_VERSION', '9.8.26');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -66,6 +66,7 @@ class MCU_Custom_Updater {
         // pagina admin, il che svuoterebbe il cache del repo ad ogni richiesta costringendo
         // una chiamata HTTP sincrona di 15s al prossimo caricamento.
         add_action('upgrader_process_complete', [$this, 'delete_internal_cache'], 10, 2);
+        add_filter('upgrader_source_selection', [$this, 'select_self_update_source'], 10, 4);
         // Hook per triggerare l'update del DB di Elementor
         add_action('upgrader_process_complete', [$this, 'trigger_elementor_db_update'], 20, 2);
         

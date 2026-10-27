@@ -33,6 +33,9 @@ final class Plugin {
 		Diagnostics_Scheduler::init();
 		Update_Verification::init();
 
+		require_once MCU_PLUGIN_DIR . 'includes/mcu-client/class-debug-manager.php';
+		add_action( 'init', array( Debug_Manager::class, 'maybe_cleanup_config_backups' ), 20 );
+
 		add_action( 'rest_api_init', array( __CLASS__, 'register_rest_routes' ) );
 		// Enforce the inactive state on frontend, admin and WP-Cron requests.
 		add_action( 'init', array( __CLASS__, 'enforce_repository_access' ), 1 );

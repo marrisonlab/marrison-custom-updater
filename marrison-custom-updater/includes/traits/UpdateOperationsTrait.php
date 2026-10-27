@@ -1424,6 +1424,48 @@ trait MCU_Update_Operations_Trait {
         });
     }
 
+    /** Select only the plugin from either a release ZIP or a GitHub checkout archive. */
+    private function resolve_self_update_source($source) {
+        global $wp_filesystem;
+        $source = trailingslashit($source);
+        $nested_source = $source . 'marrison-custom-updater/';
+        if ($wp_filesystem->is_file($nested_source . 'custom_updater.php')) {
+            return $nested_source;
+        }
+        if ($wp_filesystem->is_file($source . 'custom_updater.php')) {
+            return $source;
+        }
+        return new WP_Error('mcu_update_layout', __('Il pacchetto non contiene il file principale di MCU.', 'marrison-custom-updater'));
+    }
+
+    /** Keep WordPress updates compatible with the repository's nested plugin directory. */
+    public function select_self_update_source($source, $remote_source, $upgrader, $hook_extra = null) {
+        if (is_wp_error($source) || !isset($hook_extra['plugin']) || $hook_extra['plugin'] !== plugin_basename(MCU_PLUGIN_FILE)) {
+            return $source;
+        }
+
+        global $wp_filesystem;
+        if (!$wp_filesystem) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            if (!WP_Filesystem() || !$wp_filesystem) {
+                return new WP_Error('mcu_update_filesystem', __('Impossibile inizializzare il filesystem per aggiornare MCU.', 'marrison-custom-updater'));
+            }
+        }
+
+        $source = $this->resolve_self_update_source($source);
+        if (is_wp_error($source)) {
+            return $source;
+        }
+        $destination = trailingslashit($remote_source) . 'marrison-custom-updater/';
+        if ($source === $destination) {
+            return $source;
+        }
+        if ($wp_filesystem->exists($destination) || !$wp_filesystem->move($source, $destination)) {
+            return new WP_Error('mcu_update_source_move', __('Impossibile preparare la cartella di aggiornamento MCU.', 'marrison-custom-updater'));
+        }
+        return $destination;
+    }
+
     private function perform_self_update($download_url) {
         return $this->mcu_run_update_guard('self_update', ['download_url' => $download_url], function() use ($download_url) {
         global $wp_filesystem;
@@ -1449,7 +1491,11 @@ trait MCU_Update_Operations_Trait {
              return new WP_Error('empty_zip', 'Zip archive is empty or invalid structure');
         }
         
-        $source = trailingslashit($dirs[0]);
+        $source = $this->resolve_self_update_source($dirs[0]);
+        if (is_wp_error($source)) {
+            $wp_filesystem->delete($upgrade_dir, true);
+            return $source;
+        }
         $dest   = trailingslashit(WP_PLUGIN_DIR . '/marrison-custom-updater');
         
         // Strategy: Move current to backup, copy new, if fail restore backup

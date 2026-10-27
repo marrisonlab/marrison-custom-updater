@@ -2101,21 +2101,44 @@ final class Actions_Controller {
 			'status' => 'running', 'source' => sanitize_key( $source ), 'message' => 'Sincronizzazione aggiornamenti in corso.',
 		), false );
 		$http_results = array();
-		$observer = static function ( $response, $context, $transport, $args, $url ) use ( &$http_results ) {
-			if ( 'response' !== $context || 'api.wordpress.org' !== wp_parse_url( $url, PHP_URL_HOST ) ) { return; }
-			if ( ! preg_match( '~/(plugins|themes|core)/(?:update-check|version-check)/~', (string) wp_parse_url( $url, PHP_URL_PATH ), $match ) ) { return; }
-			$key = 'core' === $match[1] ? 'offers' : $match[1];
+		$observe = static function ( $response, $url ) use ( &$http_results ) {
+			if ( 'api.wordpress.org' !== wp_parse_url( $url, PHP_URL_HOST ) ) { return; }
+			if ( ! preg_match( '~^/(plugins/update-check|themes/update-check|core/version-check)/~', (string) wp_parse_url( $url, PHP_URL_PATH ), $match ) ) { return; }
+			$kind = strtok( $match[1], '/' );
+			$key = 'core' === $kind ? 'offers' : $kind;
+			$http_code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
 			$body = is_wp_error( $response ) ? null : json_decode( (string) wp_remote_retrieve_body( $response ), true );
-			$http_results[ $match[1] ] = ! is_wp_error( $response ) && 200 === (int) wp_remote_retrieve_response_code( $response )
-				&& is_array( $body ) && isset( $body[ $key ] ) && is_array( $body[ $key ] );
+			$valid = 200 === $http_code && is_array( $body ) && isset( $body[ $key ] ) && is_array( $body[ $key ] );
+			$http_results[ $kind ] = array(
+				'success' => $valid,
+				'http_code' => $http_code,
+				'error_code' => is_wp_error( $response ) ? sanitize_key( $response->get_error_code() ) : ( $valid ? '' : 'invalid_response' ),
+			);
 		};
-		add_action( 'http_api_debug', $observer, 10, 5 );
+		// Short-circuited requests skip both http_api_debug and http_response.
+		// Observe their final filtered value without changing the response.
+		$pre_observer = static function ( $response, $args, $url ) use ( $observe ) {
+			if ( false !== $response ) { $observe( $response, $url ); }
+			return $response;
+		};
+		$response_observer = static function ( $response, $args, $url ) use ( $observe ) {
+			$observe( $response, $url );
+			return $response;
+		};
+		$error_observer = static function ( $response, $context, $transport, $args, $url ) use ( $observe ) {
+			if ( 'response' === $context && is_wp_error( $response ) ) { $observe( $response, $url ); }
+		};
+		add_filter( 'pre_http_request', $pre_observer, PHP_INT_MAX, 3 );
+		add_filter( 'http_response', $response_observer, PHP_INT_MAX, 3 );
+		add_action( 'http_api_debug', $error_observer, PHP_INT_MAX, 5 );
 		try {
 			$result = self::refresh_update_metadata( $started, $http_results );
 		} catch ( \Throwable $exception ) {
 			$result = array( 'success' => false, 'error_code' => 'update_sync_failed', 'message' => 'Sincronizzazione interrotta: impossibile verificare gli aggiornamenti.' );
 		} finally {
-			remove_action( 'http_api_debug', $observer, 10 );
+			remove_filter( 'pre_http_request', $pre_observer, PHP_INT_MAX );
+			remove_filter( 'http_response', $response_observer, PHP_INT_MAX );
+			remove_action( 'http_api_debug', $error_observer, PHP_INT_MAX );
 		}
 		$state = array(
 			'attempted_at' => $started, 'completed_at' => time(),
@@ -2165,9 +2188,18 @@ final class Actions_Controller {
 		$errors = array();
 		foreach ( array( 'plugins' => 'update_plugins', 'themes' => 'update_themes', 'core' => 'update_core' ) as $kind => $cache_key ) {
 			$value = get_site_transient( $cache_key );
-			if ( empty( $http_results[ $kind ] ) || ! is_object( $value ) || empty( $value->last_checked ) || (int) $value->last_checked < $started ) {
-				$errors[] = 'WordPress.org (' . $kind . ')';
+			$evidence = isset( $http_results[ $kind ] ) ? $http_results[ $kind ] : array();
+			$reason = '';
+			if ( ! $evidence ) {
+				$reason = 'risposta non osservata';
+			} elseif ( empty( $evidence['success'] ) ) {
+				$reason = ! empty( $evidence['http_code'] ) && 200 !== $evidence['http_code']
+					? 'HTTP ' . $evidence['http_code']
+					: ( ! empty( $evidence['error_code'] ) && 'invalid_response' !== $evidence['error_code'] ? $evidence['error_code'] : 'risposta non valida' );
+			} elseif ( ! is_object( $value ) || empty( $value->last_checked ) || (int) $value->last_checked < $started ) {
+				$reason = 'metadati non aggiornati';
 			}
+			if ( '' !== $reason ) { $errors[] = 'WordPress.org (' . $kind . ': ' . $reason . ')'; }
 		}
 		if ( false !== get_transient( 'marrison_updates_fetch_failed' ) ) { $errors[] = 'repository plugin'; }
 		if ( false !== get_transient( 'marrison_theme_updates_fetch_failed' ) ) { $errors[] = 'repository temi'; }

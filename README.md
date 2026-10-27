@@ -1,6 +1,47 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.24-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.26-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+
+## Struttura del repository
+
+La sottocartella `marrison-custom-updater/` contiene esclusivamente il plugin
+installabile: `custom_updater.php`, `readme.txt`, codice, risorse, traduzioni e i
+due file di esempio scaricabili dalla dashboard per i repository plugin e temi.
+README, changelog, test e pacchetti ZIP restano nella cartella principale.
+
+Per l'installazione caricare solo questa sottocartella in `wp-content/plugins/`,
+oppure usare lo ZIP in `dist/`. Lo ZIP contiene una sola cartella
+`marrison-custom-updater/`, senza documentazione del repository, test o altri ZIP.
+L'updater riconosce sia questo pacchetto sia gli archivi GitHub con la sottocartella
+del plugin. Il primo passaggio da una versione precedente alla riorganizzazione
+va effettuato usando lo ZIP installabile, poiche il vecchio updater non riconosce
+la nuova struttura degli archivi del repository.
+
+## Verifica risposte WordPress.org (9.8.26)
+
+La sincronizzazione riconosce anche le risposte valide restituite dai filtri
+HTTP WordPress, che non attivano l'evento di debug HTTP. Queste risposte non
+producono piu un falso errore simultaneo per plugin, temi e core in Commander.
+Le risposte normali vengono validate dopo i filtri; HTTP non riuscito, errori
+di trasporto, JSON non valido e metadati vecchi continuano a bloccare la verifica.
+Il messaggio identifica per ogni fonte il codice HTTP, il codice di errore di
+trasporto, la risposta non osservata/non valida oppure i metadati non aggiornati,
+senza esporre body, intestazioni o chiavi. Fixture: 64 controlli locali, inclusa
+la riproduzione del falso errore prima della patch; verifica live da effettuare.
+
+## Backup del config debug (9.8.25)
+
+Ogni attivazione o disattivazione del debug da Commander conserva una sola copia
+di backup di `wp-config.php`, con il contenuto precedente alla modifica. Alla prima
+richiesta WordPress dopo l'aggiornamento, MCU elimina anche le copie debug gia
+accumulate e mantiene la piu recente. La pulizia riguarda esclusivamente i file
+`wp-config.php.mcu-debug-backup-AAAAMMGGhhmmss` e
+`wp-config.php.marrison-debug-backup-AAAAMMGGhhmmss` accanto al config effettivo.
+
+Se i permessi impediscono la pulizia, il comando debug segnala l'errore e annulla
+la modifica; i comandi successivi non continuano ad accumulare backup. La pulizia
+iniziale fallita viene ritentata dopo cinque minuti, alla successiva richiesta.
+Verifica locale: `php tests/debug-backup-retention-regression.php`.
 
 ## Verifica giornaliera degli aggiornamenti (9.8.24)
 

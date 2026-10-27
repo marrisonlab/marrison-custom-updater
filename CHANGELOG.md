@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.26] - 2026-10-27
+
+### Fixed
+- Verifica WordPress.org compatibile con le risposte HTTP restituite dai filtri WordPress: non richiede piu il solo evento di debug, evitando falsi errori contemporanei per plugin, temi e core.
+- Validazione delle risposte normali dopo i filtri HTTP, mantenendo il rifiuto di errori, JSON non valido e metadati obsoleti.
+- Messaggi della sincronizzazione con causa distinta per fonte: codice HTTP/errore di trasporto, risposta non osservata/non valida o metadati non aggiornati, senza payload sensibili.
+
+## [9.8.25] - 2026-10-26
+
+### Changed
+- Plugin installabile raccolto in `marrison-custom-updater/`; documentazione del repository, test e pacchetti restano nella cartella principale.
+- Updater WordPress e autoaggiornamento MCU compatibili con i pacchetti del solo plugin e gli archivi GitHub con sottocartella. Il primo aggiornamento dalle versioni precedenti richiede lo ZIP installabile.
+
+### Fixed
+- Il debug remoto conserva un solo backup di `wp-config.php` sia in attivazione sia in disattivazione, anche dopo una scrittura del config fallita.
+- Dopo l'aggiornamento, pulizia automatica alla prima richiesta WordPress dei backup debug MCU/Marrison accumulati: resta la copia piu recente, senza modificare il config o gli altri backup.
+- Gli errori di pulizia bloccano il cambio debug e vengono segnalati, evitando di continuare a creare copie. La pulizia iniziale fallita viene ritentata dopo cinque minuti, alla successiva richiesta.
+
 ## [9.8.24] - 2026-10-18
 
 ### Added

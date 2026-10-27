@@ -14,7 +14,7 @@ namespace {
     define('MINUTE_IN_SECONDS', 60);
     define('HOUR_IN_SECONDS', 3600);
     $options = []; $cache = []; $siteCache = []; $hooks = []; $events = []; $requests = []; $failure = '';
-    class WP_Error {}
+    class WP_Error { public function get_error_code() { return 'http_request_failed'; } }
     function get_option($key, $default = false) { return $GLOBALS['options'][$key] ?? $default; }
     function update_option($key, $value, $autoload = null) { $GLOBALS['options'][$key] = $value; return true; }
     function add_option($key, $value, $unused = '', $autoload = null) { if (isset($GLOBALS['options'][$key])) return false; return update_option($key, $value); }
@@ -40,7 +40,13 @@ namespace {
     function remove_action($hook, $callback, $priority = 10) {
         $GLOBALS['hooks'][$hook] = array_filter($GLOBALS['hooks'][$hook] ?? [], fn($item) => $item !== $callback);
     }
-    function apply_filters($hook, $value) { return $hook === 'mcu_refresh_self_update' ? ($GLOBALS['failure'] !== 'github' ? '9.8.24' : false) : $value; }
+    function add_filter($hook, $callback, $priority = 10, $args = 1) { add_action($hook, $callback, $priority, $args); }
+    function remove_filter($hook, $callback, $priority = 10) { remove_action($hook, $callback, $priority); }
+    function apply_filters($hook, $value, ...$args) {
+        if ($hook === 'mcu_refresh_self_update') { return $GLOBALS['failure'] !== 'github' ? '9.8.24' : false; }
+        foreach ($GLOBALS['hooks'][$hook] ?? [] as $callback) { $value = $callback($value, ...$args); }
+        return $value;
+    }
     function wp_next_scheduled($hook) { return $GLOBALS['events'][$hook] ?? false; }
     function wp_schedule_single_event($when, $hook) { $GLOBALS['events'][$hook] = $when; return true; }
     function wp_clear_scheduled_hook($hook) { unset($GLOBALS['events'][$hook]); }
@@ -55,15 +61,31 @@ namespace {
         $key = $kind === 'core' ? 'offers' : $kind;
         $result = ['response' => ['code' => $GLOBALS['failure'] === $kind ? 503 : 200],
             'body' => $GLOBALS['failure'] === 'invalid-json' ? '<html>challenge</html>' : json_encode([$key => []])];
-        foreach ($GLOBALS['hooks']['http_api_debug'] ?? [] as $hook) { $hook($result, 'response', '', [], 'https://api.wordpress.org/' . $kind . '/' . ($kind === 'core' ? 'version-check' : 'update-check') . '/1.1/'); }
-        set_site_transient('update_' . $kind, (object) ['last_checked' => time(), 'response' => [], 'updates' => []]);
+        $url = 'https://api.wordpress.org/' . $kind . '/' . ($kind === 'core' ? 'version-check/1.7/' : 'update-check/1.1/');
+        $mode = $GLOBALS['failure'];
+        $pre = false;
+        if (in_array($mode, ['preempted', 'preempted-invalid', 'preempted-error'], true)) {
+            $pre = $mode === 'preempted-error' ? new WP_Error() : $result;
+            if ($mode === 'preempted-invalid') { $pre['body'] = '<html>challenge</html>'; }
+        }
+        $pre = apply_filters('pre_http_request', $pre, [], $url);
+        if (false === $pre) {
+            if ($mode === 'transport-error') { $result = new WP_Error(); }
+            foreach ($GLOBALS['hooks']['http_api_debug'] ?? [] as $hook) { $hook($result, 'response', '', [], $url); }
+            if (!is_wp_error($result)) {
+                if ($mode === 'final-invalid') { $result['body'] = '<html>challenge</html>'; }
+                $result = apply_filters('http_response', $result, [], $url);
+            }
+        } else { $result = $pre; }
+        // WordPress writes last_checked before HTTP, even for failed requests.
+        set_site_transient('update_' . $kind, (object) ['last_checked' => $mode === 'old-metadata' ? time() - 3600 : time(), 'response' => [], 'updates' => []]);
     }
     function wp_version_check($extra = [], $force = false) { simulateSource('core'); }
     function wp_update_plugins() { simulateSource('plugins'); }
     function wp_update_themes() { simulateSource('themes'); }
     function wp_get_translation_updates() { return []; }
-    require __DIR__ . '/../includes/mcu-client/class-actions-controller.php';
-    require __DIR__ . '/../includes/mcu-client/class-update-verification.php';
+    require __DIR__ . '/../marrison-custom-updater/includes/mcu-client/class-actions-controller.php';
+    require __DIR__ . '/../marrison-custom-updater/includes/mcu-client/class-update-verification.php';
     $checks = 0;
     function check($condition, $label) { if (!$condition) throw new \RuntimeException($label); $GLOBALS['checks']++; }
     check(Update_Verification::time() === '03:00', 'Default 03:00');
@@ -93,6 +115,28 @@ namespace {
         check($options['mcu_update_sync_status']['last_success_at'] === $lastSuccess, 'Retains last success on ' . $failure);
         check(!isset($options['mcu_update_sync_lock']), 'Releases sync lock on failure');
     }
+    $failure = 'preempted';
+    $result = Actions_Controller::force_update_sync();
+    check(!empty($result['success']), 'Valid pre_http_request responses verify without debug events');
+    check($options['mcu_update_sync_status']['status'] === 'completed', 'Filtered responses recover persisted failed sync');
+    foreach (['preempted-invalid', 'preempted-error', 'transport-error', 'final-invalid', 'old-metadata'] as $failure) {
+        $result = Actions_Controller::force_update_sync();
+        check(empty($result['success']), 'Rejects invalid evidence: ' . $failure);
+        check(!array_filter($hooks), 'Observers are removed after ' . $failure);
+    }
+    foreach (['plugins', 'themes', 'core'] as $failure) {
+        $result = Actions_Controller::force_update_sync();
+        check(str_contains($result['message'], $failure . ': HTTP 503'), 'Reports HTTP failure for ' . $failure);
+    }
+    $failure = 'transport-error';
+    check(str_contains(Actions_Controller::force_update_sync()['message'], 'http_request_failed'), 'Reports safe transport error code');
+    $failure = 'preempted-invalid';
+    check(str_contains(Actions_Controller::force_update_sync()['message'], 'risposta non valida'), 'Reports malformed filtered response');
+    $failure = 'old-metadata';
+    check(str_contains(Actions_Controller::force_update_sync()['message'], 'metadati non aggiornati'), 'Old cache cannot verify valid HTTP');
+    $failure = '';
+    check(!empty(Actions_Controller::force_update_sync()['success']), 'Real valid responses recover after failures');
+    check(!array_filter($hooks), 'Observers are removed after success');
     $failure = 'plugins';
     Update_Verification::run();
     check(($events[Update_Verification::RETRY_HOOK] ?? 0) >= time() + 899, 'Retries after 15 minutes');
