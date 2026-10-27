@@ -1,5 +1,54 @@
 <?php
 trait MCU_Update_Operations_Trait {
+
+    /** Language packages are resolved by WordPress; no caller-supplied downloads. */
+    public function mcu_remote_update_translations($response, $parameters) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return ['success' => false, 'error_code' => 'client_not_authorized', 'message' => 'Client MCU non autorizzato da Commander.'];
+        }
+        if (defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS) {
+            return ['success' => false, 'error_code' => 'file_mods_disabled', 'message' => 'Modifiche ai file disabilitate sul sito.'];
+        }
+        $lock = $this->mcu_acquire_update_lock('commander_translations_update');
+        if (is_wp_error($lock)) {
+            return ['success' => false, 'error_code' => $lock->get_error_code(), 'message' => $lock->get_error_message()];
+        }
+        @ignore_user_abort(true);
+        @set_time_limit(0);
+        $buffer_level = ob_get_level();
+        ob_start();
+        try {
+            if (!class_exists('Language_Pack_Upgrader')) require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+            if (!function_exists('request_filesystem_credentials')) require_once ABSPATH . 'wp-admin/includes/file.php';
+            if (!function_exists('wp_get_translation_updates')) require_once ABSPATH . WPINC . '/update.php';
+            $translations = wp_get_translation_updates();
+            if (!$translations) return ['success' => true, 'updated_translations_count' => 0, 'message' => 'Traduzioni gia aggiornate.'];
+            $skin = new Automatic_Upgrader_Skin();
+            $upgrader = new Language_Pack_Upgrader($skin);
+            $results = $upgrader->bulk_upgrade($translations);
+            $updated = 0;
+            $error = '';
+            if (is_array($results)) {
+                foreach ($results as $result) {
+                    if ($result && !is_wp_error($result)) $updated++;
+                    elseif (is_wp_error($result) && $error === '') $error = $result->get_error_message();
+                }
+            } elseif (is_wp_error($results)) {
+                $error = $results->get_error_message();
+            }
+            $success = is_array($results) && $updated === count($translations) && count($results) === count($translations);
+            if (!$success && $error === '') {
+                $error = $this->mcu_upgrader_failure_message($skin, $upgrader, 'Aggiornamento traduzioni non completato.');
+            }
+            return ['success' => $success, 'updated_translations_count' => $updated,
+                'error_code' => $success ? '' : 'translation_update_failed',
+                'message' => $success ? sprintf('%d traduzioni aggiornate.', $updated) : sanitize_text_field($error)];
+        } finally {
+            while (ob_get_level() > $buffer_level) ob_end_clean();
+            $this->mcu_release_update_lock($lock);
+        }
+    }
+
     private function get_available_updates() {
         if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return [];
         $repo_url = trailingslashit((string) get_option('marrison_repo_url', ''));

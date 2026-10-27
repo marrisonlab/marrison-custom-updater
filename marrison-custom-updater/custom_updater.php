@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.27
+ * Version: 9.8.28
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.27');
+    define('MCU_PLUGIN_VERSION', '9.8.28');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -83,6 +83,7 @@ class MCU_Custom_Updater {
         add_filter('mcu_remote_update_plugin', [$this, 'mcu_remote_update_plugin'], 10, 2);
         add_filter('mcu_remote_remove_plugin', [$this, 'mcu_remote_remove_plugin'], 10, 2);
         add_filter('mcu_remote_update_theme', [$this, 'mcu_remote_update_theme'], 10, 2);
+        add_filter('mcu_remote_update_translations', [$this, 'mcu_remote_update_translations'], 10, 2);
         add_filter('mcu_refresh_self_update', [$this, 'mcu_refresh_self_update']);
         
         add_action('admin_post_marrison_download_repo_file', [$this, 'download_repo_file']);

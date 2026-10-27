@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.27
+Stable tag: 9.8.28
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -62,6 +62,9 @@ i dati nel database. Eseguire Verifica connessione in Commander dopo l'aggiornam
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.28 =
+* Aggiornamento diretto delle traduzioni nel flusso Commander, con lock ed esiti parziali espliciti.
 
 = 9.8.27 =
 * GitHub esclusivo dei siti non gestiti da Commander; catalogo privato esistente sui siti gestiti.

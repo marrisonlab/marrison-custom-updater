@@ -209,6 +209,8 @@ final class Actions_Controller {
 			$payload = apply_filters( 'mcu_remote_remove_plugin', array( 'success' => false, 'error_code' => 'remove_plugin_unavailable', 'message' => 'Rimozione plugin non disponibile.' ), $parameters );
 		} elseif ( 'update_plugin' === $operation ) {
 			$payload = self::update_plugin( $parameters );
+		} elseif ( 'update_translations' === $operation ) {
+			$payload = self::update_translations( $parameters );
 		} elseif ( 'update_theme' === $operation ) {
 			$payload = self::update_theme( $parameters );
 		} elseif ( 'set_update_exclusion' === $operation ) {
@@ -331,6 +333,12 @@ final class Actions_Controller {
 					'allowed_params' => array( 'plugin_file', 'slug', 'name', 'type', 'current_version', 'new_version', 'package', 'job_id', 'step', 'total' ),
 					'timeout'        => 300,
 					'schema_version' => 1,
+				),
+				'update_translations' => array(
+					'type' => 'write', 'cost_class' => 'moderate',
+					'required' => array(),
+					'allowed_params' => array( 'job_id', 'step', 'total' ),
+					'timeout' => 300, 'schema_version' => 1,
 				),
 				'update_theme' => array(
 					'type'           => 'write',
@@ -1008,6 +1016,39 @@ final class Actions_Controller {
 				'message' => $message,
 			)
 		);
+	}
+
+
+	/** Execute language packs in the same signed, synchronous update flow. */
+	private static function update_translations( array $parameters ) {
+		$job_id = sanitize_text_field( (string) ( $parameters['job_id'] ?? '' ) );
+		if ( '' === $job_id ) $job_id = wp_generate_uuid4();
+		$step = max( 1, (int) ( $parameters['step'] ?? 1 ) );
+		$total = max( $step, (int) ( $parameters['total'] ?? $step ) );
+		self::save_update_status( array(
+			'job_id' => $job_id, 'operation' => 'update_translations', 'status' => 'running',
+			'requested_at' => time(), 'started_at' => time(), 'finished_at' => 0,
+			'step' => $step, 'total' => $total, 'message' => 'Aggiornamento traduzioni in corso.',
+		) );
+		try {
+			$result = apply_filters( 'mcu_remote_update_translations', array(
+				'success' => false, 'error_code' => 'update_translations_unavailable',
+				'message' => 'Runner aggiornamento traduzioni non disponibile.',
+			), $parameters );
+			if ( ! is_array( $result ) ) throw new \RuntimeException( 'Risposta aggiornamento traduzioni non valida.' );
+		} catch ( \Throwable $e ) {
+			$result = array( 'success' => false, 'error_code' => 'translation_update_failed', 'message' => 'Aggiornamento traduzioni interrotto.' );
+		}
+		$success = ! empty( $result['success'] );
+		$message = self::safe_text( (string) ( $result['message'] ?? 'Aggiornamento traduzioni non completato.' ) );
+		self::save_update_status( array_merge( self::current_update_status(), array(
+			'job_id' => $job_id, 'status' => $success ? 'completed' : 'failed',
+			'finished_at' => time(), 'message' => $message,
+			'error_code' => $success ? '' : self::safe_text( (string) ( $result['error_code'] ?? 'translation_update_failed' ) ),
+			'last_result' => $result,
+		) ) );
+		return array_merge( $result, array( 'job_id' => $job_id, 'status' => $success ? 'completed' : 'failed',
+			'step' => $step, 'total' => $total, 'message' => $message ) );
 	}
 
 	/**

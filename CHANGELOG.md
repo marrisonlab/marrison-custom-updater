@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.28] - 2026-10-27
+
+- Aggiunta update_translations al canale firmato esistente, senza cron. Pacchetti risolti da WordPress, lock MCU, rifiuto di esiti parziali e rilascio lock anche su eccezione.
+- Richiede la patch Commander per completare plugin, temi e traduzioni con un solo comando. Verifiche locali; nessun deployment live.
+
 ## [9.8.27] - 2026-10-27
 
 ### Fixed
