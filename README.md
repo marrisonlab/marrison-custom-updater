@@ -1,6 +1,6 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.26-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.27-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
 
 ## Struttura del repository
 
@@ -16,6 +16,16 @@ L'updater riconosce sia questo pacchetto sia gli archivi GitHub con la sottocart
 del plugin. Il primo passaggio da una versione precedente alla riorganizzazione
 va effettuato usando lo ZIP installabile, poiche il vecchio updater non riconosce
 la nuova struttura degli archivi del repository.
+
+## Fonte aggiornamenti MCU (9.8.27)
+
+I siti gestiti da Commander usano esclusivamente il repository privato gia
+configurato da Commander anche per i metadati MCU. Non interrogano GitHub e un
+vecchio errore GitHub non rende obsoleti i dati verificati di WordPress, plugin
+e temi. Restano bloccanti le ricerche WordPress.org o dei repository privati
+non riuscite. I siti non gestiti da Commander mantengono il controllo e lo ZIP
+GitHub attraverso il normale aggiornamento WordPress. Nessun nuovo endpoint,
+chiave o sistema di distribuzione.
 
 ## Verifica risposte WordPress.org (9.8.26)
 

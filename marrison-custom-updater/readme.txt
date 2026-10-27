@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.26
+Stable tag: 9.8.27
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -13,6 +13,10 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 
 == Description ==
+
+MCU 9.8.27 usa GitHub soltanto sui siti non gestiti da Commander. Sui siti
+gestiti usa il repository privato esistente di Commander e non considera
+bloccanti i vecchi errori GitHub. Le altre fonti continuano a essere verificate.
 
 MCU 9.8.26 corregge i falsi errori WordPress.org quando le risposte HTTP valide
 passano dai filtri WordPress. Gli errori reali restano bloccanti e il messaggio
@@ -58,6 +62,11 @@ i dati nel database. Eseguire Verifica connessione in Commander dopo l'aggiornam
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.27 =
+* GitHub esclusivo dei siti non gestiti da Commander; catalogo privato esistente sui siti gestiti.
+* Rimosso il blocco della sincronizzazione e dello status gestiti dovuto alla versione GitHub o a vecchi errori GitHub.
+* Errori WordPress.org e repository privati ancora bloccanti; niente record no_update fittizi dopo errori GitHub.
 
 = 9.8.26 =
 * Verifica WordPress.org compatibile con risposte HTTP filtrate, senza falsi errori simultanei per plugin, temi e core.

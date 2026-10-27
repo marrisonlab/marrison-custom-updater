@@ -43,7 +43,7 @@ namespace {
     function add_filter($hook, $callback, $priority = 10, $args = 1) { add_action($hook, $callback, $priority, $args); }
     function remove_filter($hook, $callback, $priority = 10) { remove_action($hook, $callback, $priority); }
     function apply_filters($hook, $value, ...$args) {
-        if ($hook === 'mcu_refresh_self_update') { return $GLOBALS['failure'] !== 'github' ? '9.8.24' : false; }
+        if ($hook === 'mcu_refresh_self_update') { $GLOBALS['githubChecks']++; return $GLOBALS['failure'] !== 'github' ? '9.8.24' : false; }
         foreach ($GLOBALS['hooks'][$hook] ?? [] as $callback) { $value = $callback($value, ...$args); }
         return $value;
     }
@@ -109,12 +109,18 @@ namespace {
     check(!empty($result['success']), 'All sources complete successfully');
     check($options['mcu_update_sync_status']['status'] === 'completed', 'Persists actual success');
     $lastSuccess = $options['mcu_update_sync_status']['last_success_at'];
-    foreach (['plugins', 'themes', 'core', 'private', 'github', 'invalid-json'] as $failure) {
+    foreach (['plugins', 'themes', 'core', 'private', 'invalid-json'] as $failure) {
         $result = Actions_Controller::force_update_sync();
         check(empty($result['success']), 'No false success on ' . $failure);
         check($options['mcu_update_sync_status']['last_success_at'] === $lastSuccess, 'Retains last success on ' . $failure);
         check(!isset($options['mcu_update_sync_lock']), 'Releases sync lock on failure');
     }
+    $githubChecks = 0; $failure = 'github';
+    $cache['marrison_github_fetch_failed'] = 1;
+    $result = Actions_Controller::force_update_sync();
+    check(!empty($result['success']), 'GitHub failure cannot block a Commander-managed sync');
+    check($githubChecks === 0, 'Managed sync does not invoke the GitHub lookup');
+    check($options['mcu_update_sync_status']['status'] === 'completed', 'Managed sync completes with private and WordPress sources verified');
     $failure = 'preempted';
     $result = Actions_Controller::force_update_sync();
     check(!empty($result['success']), 'Valid pre_http_request responses verify without debug events');

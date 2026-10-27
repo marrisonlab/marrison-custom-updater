@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.26
+ * Version: 9.8.27
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.26');
+    define('MCU_PLUGIN_VERSION', '9.8.27');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -714,7 +714,10 @@ class MCU_Custom_Updater {
 
     public function check_for_updates($transient) {
         if (!is_admin()) return $transient;
-        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return $transient;
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            if (is_object($transient)) $this->check_self_update($transient);
+            return $transient;
+        }
         if (!is_object($transient)) $transient = new stdClass();
         
         // Assicurati che le proprietà esistano
@@ -911,6 +914,8 @@ class MCU_Custom_Updater {
     }
 
     private function check_self_update($transient) {
+        // Managed sites receive MCU metadata through Commander's existing private repository.
+        if (\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return;
         $plugin_file = plugin_basename(__FILE__);
         $plugins = get_plugins();
 
@@ -918,6 +923,7 @@ class MCU_Custom_Updater {
 
         $installed = $plugins[$plugin_file]['Version'];
         $remote = $this->get_github_version();
+        if (!$remote) return;
 
         $item = (object)[
             'id'          => 'marrison-custom-updater',
@@ -945,6 +951,7 @@ class MCU_Custom_Updater {
     }
 
     private function get_github_version() {
+        if (\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return false;
         $cached = get_transient('marrison_updater_github_version');
         if ($cached !== false) return $cached;
 
@@ -975,6 +982,7 @@ class MCU_Custom_Updater {
     }
 
     public function mcu_refresh_self_update() {
+        if (\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) return true;
         $version = $this->get_github_version();
         if (!$version) return false;
         $transient = get_site_transient('update_plugins');

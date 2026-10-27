@@ -135,7 +135,7 @@ final class Rest_Controller {
 			&& 'completed' === ( isset( $sync_status['status'] ) ? $sync_status['status'] : '' )
 			&& false === get_transient( 'marrison_updates_fetch_failed' )
 			&& false === get_transient( 'marrison_theme_updates_fetch_failed' )
-			&& false === get_transient( 'marrison_github_fetch_failed' );
+			&& ( Settings::repository_config_managed() || false === get_transient( 'marrison_github_fetch_failed' ) );
 		$next_scheduled_run  = self::next_scheduled_update_run();
 		$mcu_frequency       = self::mcu_update_frequency();
 		$mcu_month_day       = self::mcu_update_month_day();

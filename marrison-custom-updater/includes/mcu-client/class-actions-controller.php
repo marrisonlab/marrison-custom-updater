@@ -2159,8 +2159,10 @@ final class Actions_Controller {
 	private static function refresh_update_metadata( $started, array &$http_results ) {
 		@set_time_limit( 120 );
 		self::clear_update_caches();
-		delete_transient( 'marrison_updater_github_version' );
-		delete_transient( 'marrison_github_fetch_failed' );
+		if ( ! Settings::repository_config_managed() ) {
+			delete_transient( 'marrison_updater_github_version' );
+			delete_transient( 'marrison_github_fetch_failed' );
+		}
 		if ( function_exists( 'wp_clean_plugins_cache' ) ) { wp_clean_plugins_cache( false ); }
 		if ( function_exists( 'wp_clean_themes_cache' ) ) { wp_clean_themes_cache( false ); }
 
@@ -2184,7 +2186,7 @@ final class Actions_Controller {
 		$private_plugins = self::fetch_private_repo_updates( 'plugin' );
 		$private_themes  = self::fetch_private_repo_updates( 'theme' );
 		self::inject_private_theme_updates( $private_themes );
-		$github_version = apply_filters( 'mcu_refresh_self_update', false );
+		$github_version = Settings::repository_config_managed() ? true : apply_filters( 'mcu_refresh_self_update', false );
 		$errors = array();
 		foreach ( array( 'plugins' => 'update_plugins', 'themes' => 'update_themes', 'core' => 'update_core' ) as $kind => $cache_key ) {
 			$value = get_site_transient( $cache_key );
