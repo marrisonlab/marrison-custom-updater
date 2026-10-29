@@ -472,6 +472,11 @@ final class Rest_Controller {
 				$name        = isset( $data['Name'] ) && '' !== $data['Name'] ? (string) $data['Name'] : $slug;
 				$current     = isset( $data['Version'] ) ? (string) $data['Version'] : '';
 				$new_version = is_object( $update ) && isset( $update->new_version ) ? (string) $update->new_version : '';
+				// A fresh source check can still expose an obsolete transient entry.
+				// Only versions newer than the installed plugin are update offers.
+				if ( '' === $current || '' === $new_version || ! version_compare( $current, $new_version, '<' ) ) {
+					continue;
+				}
 				if ( self::is_plugin_update_excluded( $slug, $file, $name, $update ) ) {
 					continue;
 				}

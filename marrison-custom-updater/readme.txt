@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.28
+Stable tag: 9.8.31
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -13,6 +13,16 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 
 == Description ==
+
+MCU 9.8.31 non ripropone offerte WordPress.org gia installate. Una richiesta
+per una versione gia presente non reinstalla il plugin e non produce un falso errore.
+
+MCU 9.8.30 corregge la riammissione dei plugin esclusi da Commander e verifica
+la configurazione riletta dopo il salvataggio. Include le correzioni 9.8.29.
+
+MCU 9.8.29 forza il controllo WordPress.org di plugin e temi anche quando
+una cache o un filtro ripresenta un transient recente. Errori HTTP, risposte
+non valide e metadati vecchi restano bloccanti. Correzione verificata localmente.
 
 MCU 9.8.27 usa GitHub soltanto sui siti non gestiti da Commander. Sui siti
 gestiti usa il repository privato esistente di Commander e non considera
@@ -62,6 +72,18 @@ i dati nel database. Eseguire Verifica connessione in Commander dopo l'aggiornam
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.31 =
+* Offerte plugin ufficiali filtrate sulla versione effettivamente installata.
+* Installazione diretta idempotente quando la versione richiesta e gia presente.
+
+= 9.8.30 =
+* Corretta la rimozione delle esclusioni plugin: confronto sulle chiavi della mappa.
+* Conteggi coerenti con la configurazione persistita ed errore esplicito se il salvataggio fallisce.
+
+= 9.8.29 =
+* Sincronizzazione forzata: evita che transient recenti saltino il controllo HTTP di plugin e temi.
+* Mantiene obbligatorie risposte valide e metadati freschi; verifiche locali, nessun deployment live.
 
 = 9.8.28 =
 * Aggiornamento diretto delle traduzioni nel flusso Commander, con lock ed esiti parziali espliciti.

@@ -1,6 +1,18 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.28-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.29-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+
+## Sincronizzazione forzata (9.8.29)
+
+La verifica esplicita usa statistiche non vuote per forzare wp_update_plugins e
+wp_update_themes oltre il limite temporale di WordPress. Questo evita il falso
+risposta non osservata quando una cache o un filtro ripresenta metadati recenti
+dopo la cancellazione. Non viene accettata la sola data last_checked: servono
+ancora una risposta HTTP valida e metadati freschi. Nessun nuovo endpoint.
+
+Validazione locale: 78 controlli della fixture MCU, inclusi transient recenti
+e HTTP 503 per entrambi i tipi. La causa specifica sul sito cliente resta
+da confermare; nessuna installazione live effettuata.
 
 ## Struttura del repository
 

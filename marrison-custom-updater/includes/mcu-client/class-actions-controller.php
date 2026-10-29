@@ -1098,7 +1098,7 @@ final class Actions_Controller {
 				array_filter(
 					$stored,
 					static function ( $item ) use ( $target_key ) {
-						foreach ( self::plugin_identifier_key_list( array( $item ) ) as $key ) {
+						foreach ( self::plugin_identifier_key_list( array( $item ) ) as $key => $present ) {
 							if ( isset( $target_key[ $key ] ) ) {
 								return false;
 							}
@@ -1118,28 +1118,33 @@ final class Actions_Controller {
 			);
 		}
 		$after_remove_count = count( $stored );
-		$remaining_matches  = 'plugin' === $type
-			? self::count_matching_plugin_exclusions( $stored, isset( $target_key ) ? $target_key : array() )
-			: 0;
-
 		if ( $excluded && '' !== $target ) {
 			$stored[] = $target;
 			$stored   = array_values( array_unique( $stored ) );
 		}
 
 		update_option( $option_name, $stored, false );
+		// update_option() also returns false for a no-op. Verify the readback
+		// instead, so an accepted command cannot hide a failed option write.
+		$persisted = get_option( $option_name, array() );
+		$persisted = is_array( $persisted ) ? array_values( array_map( 'strval', $persisted ) ) : array();
+		$saved = $persisted === $stored;
+		$remaining_matches = 'plugin' === $type
+			? self::count_matching_plugin_exclusions( $persisted, isset( $target_key ) ? $target_key : array() )
+			: count( array_filter( $persisted, static function ( $item ) use ( $target ) { return sanitize_key( (string) $item ) === $target; } ) );
 		delete_site_transient( 'update_plugins' );
 		delete_site_transient( 'update_themes' );
 
 		return array(
-			'success'    => true,
-			'message'    => $excluded ? __( 'Elemento escluso dagli aggiornamenti.', 'marrison-custom-updater' ) : __( 'Elemento riammesso negli aggiornamenti.', 'marrison-custom-updater' ),
+			'success'    => $saved,
+			'error_code' => $saved ? '' : 'update_exclusion_not_saved',
+			'message'    => ! $saved ? __( 'Impossibile salvare lo stato esclusione. La configurazione letta non conferma la modifica.', 'marrison-custom-updater' ) : ( $excluded ? __( 'Elemento escluso dagli aggiornamenti.', 'marrison-custom-updater' ) : __( 'Elemento riammesso negli aggiornamenti.', 'marrison-custom-updater' ) ),
 			'type'       => $type,
 			'identifier' => $target,
 			'excluded'   => $excluded,
 			'before_count' => $before_count,
-			'after_count'  => count( $stored ),
-			'removed_count' => max( 0, $before_count - $after_remove_count ),
+			'after_count'  => count( $persisted ),
+			'removed_count' => $saved ? max( 0, $before_count - $after_remove_count ) : 0,
 			'remaining_match_count' => $remaining_matches,
 			'exclusions' => array(
 				'plugins' => get_option( 'marrison_excluded_plugins', array() ),
@@ -1304,7 +1309,7 @@ final class Actions_Controller {
 	private static function count_matching_plugin_exclusions( array $stored, array $target_key ) {
 		$count = 0;
 		foreach ( $stored as $item ) {
-			foreach ( self::plugin_identifier_key_list( array( $item ) ) as $key ) {
+			foreach ( self::plugin_identifier_key_list( array( $item ) ) as $key => $present ) {
 				if ( isset( $target_key[ $key ] ) ) {
 					$count++;
 					break;
@@ -2218,10 +2223,12 @@ final class Actions_Controller {
 			wp_version_check( array(), true );
 		}
 		if ( function_exists( 'wp_update_plugins' ) ) {
-			wp_update_plugins();
+			// Nonempty stats bypass WordPress's recent-check throttle, even if
+			// another request or a cache filter restored the deleted transient.
+			wp_update_plugins( array( 'mcu_force_sync' => true ) );
 		}
 		if ( function_exists( 'wp_update_themes' ) ) {
-			wp_update_themes();
+			wp_update_themes( array( 'mcu_force_sync' => true ) );
 		}
 
 		$private_plugins = self::fetch_private_repo_updates( 'plugin' );

@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.28
+ * Version: 9.8.31
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.28');
+    define('MCU_PLUGIN_VERSION', '9.8.31');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -1704,6 +1704,9 @@ echo json_encode($data);
             include_once ABSPATH . 'wp-admin/includes/plugin.php';
             include_once ABSPATH . 'wp-admin/includes/file.php';
 
+            if (function_exists('wp_clean_plugins_cache')) {
+                wp_clean_plugins_cache(false);
+            }
             $plugins = get_plugins();
             if (!isset($plugins[$file])) {
                 return new WP_Error('plugin_not_found', __('Plugin non trovato.', 'marrison-custom-updater'));
@@ -1717,6 +1720,13 @@ echo json_encode($data);
             $plugin_name = isset($plugins[$file]['Name']) ? (string) $plugins[$file]['Name'] : $plugin_slug;
             if ($this->mcu_is_plugin_update_excluded($plugin_slug, $file, $plugin_name)) {
                 return new WP_Error('plugin_update_excluded', __('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'));
+            }
+            // Another request or WordPress may already have installed this
+            // target since Commander read the offer. Never reinstall/downgrade.
+            if (preg_match('/^\d[0-9A-Za-z.+_\-]*$/D', $new_version)
+                && preg_match('/^\d[0-9A-Za-z.+_\-]*$/D', $current_version)
+                && version_compare($current_version, $new_version, '>=')) {
+                return true;
             }
             $this->create_backup($plugin_slug, $current_version, 'plugin', $file);
 

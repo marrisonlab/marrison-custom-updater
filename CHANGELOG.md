@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.31] - 2026-10-29
+
+### Fixed
+- Le offerte plugin WordPress.org vengono esposte solo se la versione proposta supera quella installata, come gia accade per le offerte private.
+- Il runner ufficiale rilegge i metadati installati e tratta una versione richiesta gia presente come no-op riuscito, senza reinstallazione o backup. Esclusioni e veri errori di installazione restano vincolanti.
+- Regressione riprodotta prima della patch con offerta 4.2.3 su Fonts Plugin gia alla 4.2.3; test locali, nessuna installazione live.
+
+## [9.8.30] - 2026-10-28
+
+### Fixed
+- Riammissione plugin da Commander: i cicli di rimozione e conteggio usano le chiavi della mappa identificatori, anziche i valori booleani.
+- Verifica della configurazione riletta dopo update_option; nessun falso successo se il salvataggio fallisce. Conteggi basati sul valore persistito.
+- Regressione locale sulle esclusioni con metodi reali MCU e opzioni simulate; nessuna installazione live.
+
+## [9.8.29] - 2026-10-28
+
+### Fixed
+- La sincronizzazione esplicita supera il limite temporale WordPress per plugin e temi tramite extra_stats non vuoto, anche se filtri/cache ripresentano un transient recente.
+- Restano obbligatorie evidenza HTTP valida e metadati freschi; errori reali non diventano un completamento riuscito.
+- 78 controlli MCU locali, inclusi il messaggio riprodotto prima della patch e i fallimenti HTTP con cache recente. Nessun deployment live.
+
 ## [9.8.28] - 2026-10-27
 
 - Aggiunta update_translations al canale firmato esistente, senza cron. Pacchetti risolti da WordPress, lock MCU, rifiuto di esiti parziali e rilascio lock anche su eccezione.

@@ -81,8 +81,23 @@ namespace {
         set_site_transient('update_' . $kind, (object) ['last_checked' => $mode === 'old-metadata' ? time() - 3600 : time(), 'response' => [], 'updates' => []]);
     }
     function wp_version_check($extra = [], $force = false) { simulateSource('core'); }
-    function wp_update_plugins() { simulateSource('plugins'); }
-    function wp_update_themes() { simulateSource('themes'); }
+    function simulateThrottledSource($kind, $extra_stats) {
+        // WordPress skips HTTP for a recent unchanged transient unless extra_stats
+        // is nonempty. A persistent-cache filter can restore it after deletion.
+        if (str_starts_with($GLOBALS['failure'], 'warm-' . $kind)) {
+            set_site_transient('update_' . $kind, (object) ['last_checked' => time(), 'checked' => [], 'response' => []]);
+            if (!$extra_stats) { return; }
+            $GLOBALS['forcedChecks'][] = $kind;
+            $mode = $GLOBALS['failure'];
+            if (str_ends_with($mode, '-http-failure')) { $GLOBALS['failure'] = $kind; }
+            simulateSource($kind);
+            $GLOBALS['failure'] = $mode;
+            return;
+        }
+        simulateSource($kind);
+    }
+    function wp_update_plugins($extra_stats = []) { simulateThrottledSource('plugins', $extra_stats); }
+    function wp_update_themes($extra_stats = []) { simulateThrottledSource('themes', $extra_stats); }
     function wp_get_translation_updates() { return []; }
     require __DIR__ . '/../marrison-custom-updater/includes/mcu-client/class-actions-controller.php';
     require __DIR__ . '/../marrison-custom-updater/includes/mcu-client/class-update-verification.php';
@@ -140,6 +155,20 @@ namespace {
     check(str_contains(Actions_Controller::force_update_sync()['message'], 'risposta non valida'), 'Reports malformed filtered response');
     $failure = 'old-metadata';
     check(str_contains(Actions_Controller::force_update_sync()['message'], 'metadati non aggiornati'), 'Old cache cannot verify valid HTTP');
+    foreach (['themes', 'plugins'] as $kind) {
+        $failure = 'warm-' . $kind; $forcedChecks = [];
+        $result = Actions_Controller::force_update_sync();
+        check(!empty($result['success']), 'Forced sync bypasses recent ' . $kind . ' transient: ' . $result['message']);
+        check($forcedChecks === [$kind], 'Makes one forced ' . $kind . ' HTTP check');
+        check(!array_filter($hooks) && !isset($options['mcu_update_sync_lock']), 'Cleans up after warm ' . $kind . ' cache');
+        $failure = 'warm-' . $kind . '-http-failure'; $forcedChecks = [];
+        $lastSuccessBeforeFailure = $options['mcu_update_sync_status']['last_success_at'];
+        $result = Actions_Controller::force_update_sync();
+        check(empty($result['success']) && str_contains($result['message'], $kind . ': HTTP 503'), 'Warm ' . $kind . ' cache cannot hide HTTP failure');
+        check($forcedChecks === [$kind], 'Does not retry a failed ' . $kind . ' provider');
+        check($options['mcu_update_sync_status']['last_success_at'] === $lastSuccessBeforeFailure, 'Retains last success after forced ' . $kind . ' failure');
+        check(!array_filter($hooks) && !isset($options['mcu_update_sync_lock']), 'Cleans up after forced ' . $kind . ' failure');
+    }
     $failure = '';
     check(!empty(Actions_Controller::force_update_sync()['success']), 'Real valid responses recover after failures');
     check(!array_filter($hooks), 'Observers are removed after success');
