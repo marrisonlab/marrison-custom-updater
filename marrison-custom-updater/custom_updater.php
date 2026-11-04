@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.31
+ * Version: 9.8.33
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.31');
+    define('MCU_PLUGIN_VERSION', '9.8.33');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -29,6 +29,7 @@ require_once __DIR__ . '/includes/mcu-client/class-plugin.php';
 require_once __DIR__ . '/includes/traits/SchedulingTrait.php';
 require_once __DIR__ . '/includes/traits/AdminUITrait.php';
 require_once __DIR__ . '/includes/traits/UpdateOperationsTrait.php';
+require_once __DIR__ . '/includes/traits/AdminUpdateQueueTrait.php';
 
 register_activation_hook(__FILE__, ['MarrisonCustomUpdater\\MaintenanceClient\\Installer', 'activate']);
 register_deactivation_hook(__FILE__, ['MarrisonCustomUpdater\\MaintenanceClient\\Installer', 'deactivate']);
@@ -45,6 +46,7 @@ class MCU_Custom_Updater {
     use MCU_Scheduling_Trait;
     use MCU_Admin_UI_Trait;
     use MCU_Update_Operations_Trait;
+    use MCU_Admin_Update_Queue_Trait;
 
     public function __construct() {
         $this->cache_duration = defined('HOUR_IN_SECONDS') ? 6 * constant('HOUR_IN_SECONDS') : 21600;
@@ -101,16 +103,17 @@ class MCU_Custom_Updater {
         add_action('marrison_scheduled_update_event', [$this, 'run_scheduled_updates'], 10, 1);
         
         // Hook per AJAX
-        add_action('wp_ajax_marrison_update_plugin_ajax', [$this, 'update_plugin_ajax']);
+        add_action('wp_ajax_marrison_update_plugin_ajax', [$this, 'tracked_admin_update_ajax']);
         add_action('wp_ajax_marrison_bulk_update_ajax', [$this, 'bulk_update_ajax']);
         add_action('wp_ajax_marrison_auto_update_ajax', [$this, 'auto_update_ajax']);
         add_action('wp_ajax_marrison_get_official_updates_ajax', [$this, 'get_official_updates_ajax']);
-        add_action('wp_ajax_marrison_update_official_plugin_ajax', [$this, 'update_official_plugin_ajax']);
+        add_action('wp_ajax_marrison_update_official_plugin_ajax', [$this, 'tracked_admin_update_ajax']);
         add_action('wp_ajax_marrison_restore_plugin_ajax', [$this, 'restore_plugin_ajax']);
-        add_action('wp_ajax_marrison_update_private_theme_ajax', [$this, 'update_private_theme_ajax']);
+        add_action('wp_ajax_marrison_update_private_theme_ajax', [$this, 'tracked_admin_update_ajax']);
         add_action('wp_ajax_marrison_bulk_update_private_themes_ajax', [$this, 'bulk_update_private_themes_ajax']);
-        add_action('wp_ajax_marrison_update_all_themes_ajax', [$this, 'update_all_themes_ajax']);
-        add_action('wp_ajax_marrison_update_translations_ajax', [$this, 'update_translations_ajax']);
+        add_action('wp_ajax_marrison_update_all_themes_ajax', [$this, 'tracked_admin_update_ajax']);
+        add_action('wp_ajax_marrison_update_translations_ajax', [$this, 'tracked_admin_update_ajax']);
+        add_action('wp_ajax_mcu_admin_update_queue_status', [$this, 'admin_update_queue_status_ajax']);
         add_action('wp_ajax_marrison_get_all_updates_ajax', [$this, 'get_all_updates_ajax']);
         add_action('wp_ajax_marrison_test_email', [$this, 'send_test_email_ajax']);
         add_action('wp_ajax_marrison_toggle_exclusion', [$this, 'toggle_exclusion_ajax']);
@@ -480,19 +483,19 @@ class MCU_Custom_Updater {
         $new_version = sanitize_text_field($_POST['new_version'] ?? '');
 
         if (!wp_verify_nonce($nonce, 'marrison_auto_update')) {
-            wp_send_json_error(__('Security check failed', 'marrison-custom-updater'));
+            $this->mcu_send_admin_update_json(false, __('Security check failed', 'marrison-custom-updater'));
         }
 
         if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Insufficient permissions', 'marrison-custom-updater'));
+            $this->mcu_send_admin_update_json(false, __('Insufficient permissions', 'marrison-custom-updater'));
         }
 
         if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
-            wp_send_json_error(__('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater'));
+            $this->mcu_send_admin_update_json(false, __('Operazione bloccata: il client MCU non è autorizzato da Commander.', 'marrison-custom-updater'));
         }
         
         if (empty($file)) {
-             wp_send_json_error(__('Missing file parameter', 'marrison-custom-updater'));
+             $this->mcu_send_admin_update_json(false, __('Missing file parameter', 'marrison-custom-updater'));
         }
 
         include_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
@@ -512,7 +515,7 @@ class MCU_Custom_Updater {
         }
         $plugin_name = isset($all_plugins[$file]['Name']) ? $all_plugins[$file]['Name'] : $plugin_slug;
         if ($this->mcu_is_plugin_update_excluded($plugin_slug, $file, $plugin_name)) {
-            wp_send_json_error(__('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'));
+            $this->mcu_send_admin_update_json(false, __('Plugin escluso dagli aggiornamenti.', 'marrison-custom-updater'));
         }
 
         $lock = $this->mcu_acquire_update_lock('official_plugin_update', [
@@ -520,7 +523,7 @@ class MCU_Custom_Updater {
             'new_version' => $new_version,
         ]);
         if (is_wp_error($lock)) {
-            wp_send_json_error($lock->get_error_message());
+            $this->mcu_send_admin_update_json(false, $lock->get_error_message());
         }
         $snapshot = $this->mcu_capture_active_plugin_snapshot([
             'operation' => 'official_plugin_update',
@@ -579,7 +582,7 @@ class MCU_Custom_Updater {
             $this->mcu_flush_update_caches(['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_release_update_lock($lock);
-            wp_send_json_error($result->get_error_message());
+            $this->mcu_send_admin_update_json(false, $result->get_error_message());
         } elseif (!$result) {
             $error_message = $this->mcu_upgrader_failure_message(
                 $skin,
@@ -593,7 +596,7 @@ class MCU_Custom_Updater {
             $this->mcu_flush_update_caches(['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_release_update_lock($lock);
-            wp_send_json_error($error_message);
+            $this->mcu_send_admin_update_json(false, $error_message);
         } else {
             if ($was_active && !is_plugin_active($file)) {
                 // Reactivate silently: do not fire activation hooks in an update context
@@ -609,7 +612,7 @@ class MCU_Custom_Updater {
             $this->mcu_flush_update_caches(['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'official_plugin_update', 'file' => $file]);
             $this->mcu_release_update_lock($lock);
-            wp_send_json_success(__('Plugin updated', 'marrison-custom-updater'));
+            $this->mcu_send_admin_update_json(true, __('Plugin updated', 'marrison-custom-updater'));
         }
     }
 
@@ -1469,12 +1472,12 @@ echo json_encode($data);
                        wp_verify_nonce($nonce, 'marrison_update_marrison-custom-updater');
         
         if (!$nonce_valid) {
-            wp_send_json_error('Security check failed');
+            $this->mcu_send_admin_update_json(false, 'Security check failed');
         }
 
         // Verifica i permessi
         if (!current_user_can('manage_options')) {
-            wp_send_json_error('Insufficient permissions');
+            $this->mcu_send_admin_update_json(false, 'Insufficient permissions');
         }
 
         include_once ABSPATH . 'wp-admin/includes/plugin.php';
@@ -1532,11 +1535,11 @@ echo json_encode($data);
             }
 
             $this->check_for_available_updates();
-            wp_send_json_success('Plugin aggiornato con successo');
+            $this->mcu_send_admin_update_json(true, 'Plugin aggiornato con successo');
         } elseif (is_wp_error($result)) {
-            wp_send_json_error($result->get_error_message());
+            $this->mcu_send_admin_update_json(false, $result->get_error_message());
         } else {
-            wp_send_json_error('Errore durante l\'aggiornamento del plugin');
+            $this->mcu_send_admin_update_json(false, 'Errore durante l\'aggiornamento del plugin');
         }
     }
 
@@ -2002,12 +2005,12 @@ echo json_encode($data);
                        wp_verify_nonce($nonce, 'marrison_bulk_update');
         
         if (!$nonce_valid) {
-            wp_send_json_error('Security check failed');
+            $this->mcu_send_admin_update_json(false, 'Security check failed');
         }
 
         // Verifica i permessi
         if (!current_user_can('update_themes')) {
-            wp_send_json_error('Insufficient permissions');
+            $this->mcu_send_admin_update_json(false, 'Insufficient permissions');
         }
 
         // Carica classi
@@ -2043,18 +2046,18 @@ echo json_encode($data);
         }
         
         if (empty($download_url)) {
-            wp_send_json_error('URL download non trovato per lo slug: ' . $slug);
+            $this->mcu_send_admin_update_json(false, 'URL download non trovato per lo slug: ' . $slug);
         }
 
         // Esegui l'aggiornamento
         $result = $this->perform_theme_update($slug, $download_url);
         if ($result === true) {
             $this->check_for_available_updates();
-            wp_send_json_success('Tema aggiornato con successo');
+            $this->mcu_send_admin_update_json(true, 'Tema aggiornato con successo');
         } elseif (is_wp_error($result)) {
-            wp_send_json_error($result->get_error_message());
+            $this->mcu_send_admin_update_json(false, $result->get_error_message());
         } else {
-            wp_send_json_error('Errore durante l\'aggiornamento del tema');
+            $this->mcu_send_admin_update_json(false, 'Errore durante l\'aggiornamento del tema');
         }
     }
 

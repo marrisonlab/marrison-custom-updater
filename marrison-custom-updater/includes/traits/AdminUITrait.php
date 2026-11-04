@@ -150,9 +150,11 @@ trait MCU_Admin_UI_Trait {
         }
         $asset_version = defined('MCU_PLUGIN_VERSION') ? MCU_PLUGIN_VERSION : '9.7.0';
         wp_enqueue_style('mcu-admin-style', plugin_dir_url(__FILE__) . '../../assets/css/admin-style.css', [], $asset_version);
-        wp_enqueue_script('mcu-admin-script', plugin_dir_url(__FILE__) . '../../assets/js/admin-script.js', ['jquery'], $asset_version, true);
+        wp_enqueue_script('mcu-update-queue', plugin_dir_url(__FILE__) . '../../assets/js/update-queue.js', ['jquery'], $asset_version, true);
+        wp_enqueue_script('mcu-admin-script', plugin_dir_url(__FILE__) . '../../assets/js/admin-script.js', ['jquery', 'mcu-update-queue'], $asset_version, true);
         wp_localize_script('mcu-admin-script', 'marrisonUpdater', [
             'ajaxurl' => admin_url('admin-ajax.php'),
+            'queue_nonce' => wp_create_nonce('mcu_admin_update_queue'),
             'nonce'   => wp_create_nonce('marrison_ajax_nonce'),
             'toggle_exclusion_nonce' => wp_create_nonce('marrison_toggle_exclusion')
         ]);
@@ -345,6 +347,8 @@ JS
             'Tutti gli aggiornamenti completati!' => 'All updates completed!',
             'Aggiornamento massivo completato.' => 'Bulk update completed.',
             'Aggiornamento in corso:' => 'Updating:',
+            'Attendo la conclusione e verifico l’esito...' => 'Waiting for completion and checking the result...',
+            'Coda sospesa: impossibile confermare la conclusione dell’aggiornamento. Controlla i log e ricarica la pagina prima di riprovare.' => 'Queue paused: update completion could not be confirmed. Check the logs and reload the page before retrying.',
             'Impostazione salvata:' => 'Setting saved:',
             'Incluso' => 'Included',
             'Errore nel salvataggio' => 'Error while saving',
@@ -2043,18 +2047,18 @@ JS
 
         $nonce = $_POST['nonce'] ?? '';
         if (!wp_verify_nonce($nonce, 'marrison_auto_update') && !wp_verify_nonce($nonce, 'marrison_update_all')) {
-            wp_send_json_error('Security check failed');
+            $this->mcu_send_admin_update_json(false, 'Security check failed');
         }
         
         if (!current_user_can('update_themes')) {
-            wp_send_json_error('Insufficient permissions');
+            $this->mcu_send_admin_update_json(false, 'Insufficient permissions');
         }
         include_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
         include_once ABSPATH . 'wp-admin/includes/theme.php';
         wp_update_themes();
         $current = get_site_transient('update_themes');
         if (empty($current->response)) {
-             wp_send_json_error('Nessun aggiornamento temi disponibile');
+             $this->mcu_send_admin_update_json(false, 'Nessun aggiornamento temi disponibile');
         }
         
         $themes = [];
@@ -2065,12 +2069,12 @@ JS
         }
         
         if (empty($themes)) {
-             wp_send_json_error('Nessun tema da aggiornare (esclusi o aggiornati)');
+             $this->mcu_send_admin_update_json(false, 'Nessun tema da aggiornare (esclusi o aggiornati)');
         }
 
         $lock = $this->mcu_acquire_update_lock('official_themes_bulk_ajax', ['themes' => $themes]);
         if (is_wp_error($lock)) {
-            wp_send_json_error($lock->get_error_message());
+            $this->mcu_send_admin_update_json(false, $lock->get_error_message());
         }
         $snapshot = $this->mcu_capture_active_plugin_snapshot([
             'operation' => 'official_themes_bulk_ajax',
@@ -2091,7 +2095,7 @@ JS
             $this->mcu_flush_update_caches(['operation' => 'official_themes_bulk_ajax']);
             $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'official_themes_bulk_ajax']);
             $this->mcu_release_update_lock($lock);
-            wp_send_json_error($result->get_error_message());
+            $this->mcu_send_admin_update_json(false, $result->get_error_message());
         }
 
         $success_count = 0;
@@ -2106,19 +2110,19 @@ JS
              $this->mcu_flush_update_caches(['operation' => 'official_themes_bulk_ajax']);
              $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'official_themes_bulk_ajax']);
              $this->mcu_release_update_lock($lock);
-             wp_send_json_success(sprintf('%d temi aggiornati con successo', $success_count));
+             $this->mcu_send_admin_update_json(true, sprintf('%d temi aggiornati con successo', $success_count));
         } else {
              $this->mcu_flush_update_caches(['operation' => 'official_themes_bulk_ajax']);
              $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'official_themes_bulk_ajax']);
              $this->mcu_release_update_lock($lock);
-             wp_send_json_error('Nessun tema aggiornato');
+             $this->mcu_send_admin_update_json(false, 'Nessun tema aggiornato');
         }
     }
 
     public function update_translations_ajax() {
         check_ajax_referer('marrison_auto_update', 'nonce');
         if (!current_user_can('update_core')) {
-            wp_send_json_error('Insufficient permissions');
+            $this->mcu_send_admin_update_json(false, 'Insufficient permissions');
         }
 
         // Increase execution time to avoid timeouts during multiple remote checks
@@ -2140,12 +2144,12 @@ JS
         
         $translations = wp_get_translation_updates();
         if (empty($translations)) {
-             wp_send_json_error('Nessun aggiornamento traduzioni disponibile dopo il controllo forzato.');
+             $this->mcu_send_admin_update_json(false, 'Nessun aggiornamento traduzioni disponibile dopo il controllo forzato.');
         }
 
         $lock = $this->mcu_acquire_update_lock('translations_update_ajax', ['count' => count($translations)]);
         if (is_wp_error($lock)) {
-            wp_send_json_error($lock->get_error_message());
+            $this->mcu_send_admin_update_json(false, $lock->get_error_message());
         }
         $snapshot = $this->mcu_capture_active_plugin_snapshot([
             'operation' => 'translations_update_ajax',
@@ -2160,7 +2164,7 @@ JS
             $this->mcu_flush_update_caches(['operation' => 'translations_update_ajax']);
             $this->mcu_restore_active_plugin_snapshot($snapshot, ['operation' => 'translations_update_ajax']);
             $this->mcu_release_update_lock($lock);
-            wp_send_json_error($result->get_error_message());
+            $this->mcu_send_admin_update_json(false, $result->get_error_message());
         }
         
         $success_count = 0;
@@ -2177,9 +2181,9 @@ JS
         $this->mcu_release_update_lock($lock);
 
         if ($success_count > 0) {
-             wp_send_json_success(sprintf('%d traduzioni aggiornate con successo', $success_count));
+             $this->mcu_send_admin_update_json(true, sprintf('%d traduzioni aggiornate con successo', $success_count));
         } else {
-             wp_send_json_success('Processo completato.');
+             $this->mcu_send_admin_update_json(true, 'Processo completato.');
         }
     }
 

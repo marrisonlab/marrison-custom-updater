@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.31
+Stable tag: 9.8.33
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -13,6 +13,14 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 
 == Description ==
+
+MCU 9.8.33 attende la conclusione degli aggiornamenti anche dopo un timeout
+HTTP, recuperando l'esito della richiesta dal server. Le richieste respinte
+per sito occupato vengono riprovate quando il blocco e libero; un esito
+incerto sospende la coda senza saltare gli aggiornamenti successivi.
+
+MCU 9.8.32 disattiva le verifiche Maintenance giornaliere autonome e rimuove
+i relativi eventi e retry. Le verifiche richieste da Commander restano disponibili.
 
 MCU 9.8.31 non ripropone offerte WordPress.org gia installate. Una richiesta
 per una versione gia presente non reinstalla il plugin e non produce un falso errore.
@@ -72,6 +80,14 @@ i dati nel database. Eseguire Verifica connessione in Commander dopo l'aggiornam
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.33 =
+* Le code Aggiorna tutto e selezione privata attendono e verificano l'esito server dopo errori di trasporto.
+* Retry dello stesso elemento solo se la richiesta non era partita per lock occupato. Esito incerto: coda sospesa, senza avanzamento o reinstallazione alla cieca.
+* Ricevute per utente con storico limitato, controllo autenticato di sola lettura e compatibilita con lo svuotamento dell'object cache.
+
+= 9.8.32 =
+* Maintenance: rimossa la verifica giornaliera autonoma, con pulizia dei relativi vecchi eventi e retry. Le verifiche esplicite da Commander rimangono disponibili.
 
 = 9.8.31 =
 * Offerte plugin ufficiali filtrate sulla versione effettivamente installata.

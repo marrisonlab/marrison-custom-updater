@@ -84,6 +84,17 @@ jQuery(document).ready(function($) {
         }
     };
 
+    var runQueuedUpdate = window.MCUUpdateQueue({
+        ajax: function(settings) { return $.ajax(settings); },
+        url: marrisonUpdater.ajaxurl,
+        nonce: marrisonUpdater.queue_nonce
+    });
+
+    function queueHalted(message) {
+        $('#mcu-progress-status-text').text(t(message));
+        MCU.toast(t(message), 'error');
+    }
+
     $(document).on('click', '.notice-dismiss', function() {
         $(this).closest('.mcu-notice').slideUp(() => $(this).closest('.mcu-notice').remove());
     });
@@ -409,27 +420,18 @@ jQuery(document).ready(function($) {
 
             MCU.updateProgress(Math.round((index / total) * 100), t('Aggiornamento:') + ' ' + slug + '...');
 
-            $.ajax({
-                url: marrisonUpdater.ajaxurl,
-                type: 'POST',
-                data: {
-                    action: action,
-                    slug: slug,
-                    nonce: nonce
+            runQueuedUpdate({action: action, slug: slug, nonce: nonce}, {
+                waiting: function() {
+                    MCU.updateProgress(Math.round((index / total) * 100), t('Attendo la conclusione e verifico l’esito...') + ' ' + slug);
                 },
-                success: function(response) {
+                halted: queueHalted,
+                done: function(response) {
                     if (response.success) {
                         successCount++;
                     } else {
                         failCount++;
                         console.error('Update failed for ' + slug, response);
                     }
-                },
-                error: function(xhr, status, error) {
-                    failCount++;
-                    console.error('Connection error for ' + slug + ': ' + ajaxErrorMessage(xhr, status, error));
-                },
-                complete: function() {
                     processed++;
                     processNext(index + 1);
                 }
@@ -550,7 +552,7 @@ jQuery(document).ready(function($) {
                     }
 
                     var item = queue[index];
-                    var progress = Math.round(((index + 1) / total) * 100);
+                    var progress = Math.round((index / total) * 100);
                     MCU.updateProgress(progress, t('Aggiornamento in corso:') + ' ' + item.label + '...');
 
                     var ajaxData = {};
@@ -581,23 +583,18 @@ jQuery(document).ready(function($) {
                         };
                     }
 
-                    $.ajax({
-                        url: marrisonUpdater.ajaxurl,
-                        type: 'POST',
-                        data: ajaxData,
-                        success: function(res) {
+                    runQueuedUpdate(ajaxData, {
+                        waiting: function() {
+                            MCU.updateProgress(Math.round((index / total) * 100), t('Attendo la conclusione e verifico l’esito...') + ' ' + item.label);
+                        },
+                        halted: queueHalted,
+                        done: function(res) {
                             if (res.success) {
                                 successCount++;
                             } else {
                                 failCount++;
                                 console.error('Update failed for ' + item.label, res);
                             }
-                        },
-                        error: function(xhr, status, error) {
-                            failCount++;
-                            console.error('Connection error for ' + item.label + ': ' + ajaxErrorMessage(xhr, status, error));
-                        },
-                        complete: function() {
                             processed++;
                             processQueue(index + 1);
                         }

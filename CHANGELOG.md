@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.33] - 2026-11-03
+
+### Fixed
+- Le code amministrative Aggiorna tutto e selezione plugin/temi privati non avanzano piu dopo un semplice timeout HTTP: attendono il rilascio del lock e recuperano l'esito effettivo della richiesta.
+- Ogni richiesta ha una ricevuta salvata fino al completamento del relativo handler, compresi cache e riattivazione. Le ricevute sono separate per utente, non autoload, limitate a 100 e valide 24 ore; sopravvivono a wp_cache_flush.
+- Le richieste respinte dal lock vengono riprovate sullo stesso elemento solo quando il sito e libero. Nessuna reinstallazione dopo un esito recuperato; attesa limitata a 10 minuti e sospensione prudente se l'esito non e verificabile.
+- Stato interrogabile solo da amministratori con nonce, senza rimuovere lock o avviare aggiornamenti. I controlli originari dei singoli handler restano attivi.
+- Regressioni locali su timeout con PHP ancora in esecuzione, lock occupato, esiti falliti/incerti, sessione, persistenza e ricevute duplicate. Nessuna installazione live.
+
+## [9.8.32] - 2026-10-30
+
+### Fixed
+- Maintenance non pianifica verifiche giornaliere o retry autonomi: anche vecchie impostazioni attive vengono ignorate e i relativi due eventi WP-Cron vengono rimossi senza effettuare chiamate di rete.
+- Le sincronizzazioni richieste manualmente da Commander restano disponibili. I piani di installazione automatici configurati esplicitamente nel pannello MCU sono separati.
+
 ## [9.8.31] - 2026-10-29
 
 ### Fixed

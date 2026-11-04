@@ -721,6 +721,9 @@ trait MCU_Update_Operations_Trait {
                     'context'   => $context,
                 ]);
             } else {
+                if (!empty($this->mcu_admin_queue_request)) {
+                    $this->mcu_admin_queue_blocked = true;
+                }
                 $this->mcu_log_event('warning', 'update_lock_blocked', [
                     'operation' => $operation,
                     'existing'  => $existing,

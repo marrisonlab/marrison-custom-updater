@@ -1,6 +1,34 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.29-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.33-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+
+## Coda aggiornamenti dopo timeout (9.8.33)
+
+Le code **Aggiorna tutto** e **Aggiorna selezionati** per plugin/temi privati
+attendono il completamento sul server dopo un errore di trasporto, anziche
+passare subito all'elemento seguente. Il controllo dello stato usa una ricevuta
+per richiesta e il lock esistente, senza installare o cancellare blocchi.
+Quando il server conferma l'esito e il lock e libero, la coda prosegue.
+
+Solo una richiesta respinta prima dell'installazione per lock occupato viene
+riprovata automaticamente, sullo stesso elemento. Un esito sconosciuto o
+un'attesa superiore a 10 minuti sospende la coda con un messaggio visibile,
+senza attribuire un successo o avviare un'altra installazione. Dopo una
+sospensione verificare i log e ricaricare la pagina prima di riprovare.
+Le ricevute sono riservate all'utente amministratore, non autoload, conservate
+in uno storico limitato di 100 richieste e ignorate dopo 24 ore.
+
+Verifica locale: `node tests/admin-update-queue-regression.js` e
+`php tests/admin-update-receipts-regression.php`. Browser reale, timeout del
+proxy e installazione sul sito cliente restano da verificare.
+
+## Maintenance su comando (9.8.32)
+
+Il componente Maintenance non esegue piu verifiche giornaliere autonome. I vecchi
+cron `mcu_update_verification` e `mcu_update_verification_retry` vengono rimossi
+all'inizializzazione, senza avviare una sincronizzazione. Le verifiche esplicite
+da Commander restano disponibili. I piani di installazione configurati
+esplicitamente in MCU sono indipendenti.
 
 ## Sincronizzazione forzata (9.8.29)
 
