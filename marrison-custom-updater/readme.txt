@@ -5,7 +5,7 @@ Tags: updater, plugin-updates, custom repository, auto update
 Requires at least: 6.0
 Tested up to: 6.9.1
 Requires PHP: 7.4
-Stable tag: 9.8.33
+Stable tag: 9.8.39
 License: GPL-3.0+
 License URI: https://www.gnu.org/licenses/gpl-3.0.txt
 
@@ -13,6 +13,17 @@ Note: il backup completo dei file usa il formato tar.gz e richiede l'estensione 
 
 
 == Description ==
+
+MCU 9.8.39 espone il comando firmato set_plugin_active per attivare e
+disattivare plugin installati da Commander, con verifica identita e stato,
+lock condiviso, compatibilita, dipendenze e protezione di MCU.
+
+MCU 9.8.38 aggiunge installazione e attivazione dei plugin privati esclusivamente
+su richiesta autenticata di Commander, con catalogo centrale e lock condiviso.
+
+MCU 9.8.34 permette a Commander di aggiornare anche il core WordPress nel
+comando Aggiorna tutto: plugin, temi, core e traduzioni, con verifica finale.
+Il core usa esclusivamente le offerte stabili risolte da WordPress sul sito.
 
 MCU 9.8.33 attende la conclusione degli aggiornamenti anche dopo un timeout
 HTTP, recuperando l'esito della richiesta dal server. Le richieste respinte
@@ -80,6 +91,19 @@ i dati nel database. Eseguire Verifica connessione in Commander dopo l'aggiornam
 3.  Configura gli URL dei repository privati per plugin e temi nelle impostazioni di Marrison Commander.
 
 == Changelog ==
+
+= 9.8.39 =
+* Attivazione e disattivazione remota dei plugin installati tramite Commander.
+* Stato attivo incluso nell’inventario; lock, identita, dipendenze e protezione di MCU verificati.
+
+= 9.8.38 =
+* Installazione e attivazione plugin privati tramite Commander, controllo provenienza, lock e verifica esito.
+* Nessuna sovrascrittura o riattivazione automatica dei plugin gia presenti.
+
+= 9.8.34 =
+* Nuova operazione remota firmata update_core per il comando Aggiorna tutto di Commander.
+* Offerte WordPress aggiornate prima dell'installazione, nessun URL o downgrade fornito dal browser, lock condiviso e rollback nativo abilitato.
+* Esito persistito per la verifica del job; errori e blocchi restano espliciti.
 
 = 9.8.33 =
 * Le code Aggiorna tutto e selezione privata attendono e verificano l'esito server dopo errori di trasporto.

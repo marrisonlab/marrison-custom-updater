@@ -1,6 +1,23 @@
 # Marrison Custom Updater
 
-[![Latest Version](https://img.shields.io/badge/version-9.8.33-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+[![Latest Version](https://img.shields.io/badge/version-9.8.39-blue.svg)](https://github.com/marrisonlab/marrison-custom-updater)
+
+## Installazione privata da Commander (9.8.35)
+
+La nuova azione firmata `install_plugin` installa e attiva un plugin del repository centrale gestito da Commander. Non aggiunge comandi locali MCU. Plugin gia presenti non vengono sovrascritti o riattivati; le dipendenze e le policy WordPress restano applicate. Test locali: `php tests/private-install-regression.php`. Nessuna verifica su siti reali.
+
+## Aggiornamento completo da Commander (9.8.34)
+
+Il comando **Aggiorna tutto** di Commander comprende plugin, temi, core
+WordPress e traduzioni. La nuova operazione firmata `update_core` usa
+`Core_Upgrader` e solo le offerte stabili verificate da WordPress sul sito;
+il chiamante non puo indicare pacchetti o versioni da installare.
+Il runner rispetta autorizzazione, lock e policy sui file, abilita il rollback
+nativo e conserva il risultato per il controllo finale di Commander.
+Una verifica fallita o un risultato incerto non viene dichiarato completato.
+
+Verifica locale: `php tests/core-update-regression.php`. Installazione e
+aggiornamento su WordPress reale restano da verificare.
 
 ## Coda aggiornamenti dopo timeout (9.8.33)
 
@@ -575,3 +592,12 @@ Per supporto e domande:
 ---
 
 **Sviluppato con ❤️ da [Marrisonlab](https://marrisonlab.com)**
+
+## Stato plugin da Commander (9.8.39)
+
+Il nuovo comando firmato `set_plugin_active` modifica solo plugin installati
+con fingerprint corrispondente. Usa i normali hook WordPress, il lock condiviso
+e controlla compatibilita e dipendenze. MCU non puo disattivare se stesso;
+WordPress multisito e escluso per evitare variazioni di rete implicite.
+L’inventario espone `active`; Commander verifica lo stato con una richiesta
+successiva. Test locali: `php tests/plugin-state-regression.php`.

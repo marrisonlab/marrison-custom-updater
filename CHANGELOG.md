@@ -1,9 +1,45 @@
+## [9.8.39] - 2026-11-05
+
+- Comando autenticato set_plugin_active per attivazione/disattivazione plugin installati, con lock e fingerprint.
+- Normali hook WordPress, compatibilita e dipendenze verificate, auto-disattivazione MCU bloccata.
+- Stato active nell’inventario; multisito bloccato per questa operazione. Test locali senza siti reali.
+
+## [9.8.38] - 2026-11-05
+
+- Rimozione dei plugin attivi in due richieste: prima disattivazione silenziosa, poi cancellazione con identita e assenza verificate. I callback shutdown della prima richiesta conservano i file necessari.
+- Cancellazione bloccata se un plugin inattivo risulta comunque caricato da altro codice.
+- Prova locale con due processi PHP e callback shutdown che richiede un file del plugin. Nessuna rimozione live.
+
+## [9.8.37] - 2026-11-05
+
+- Accettato il redirect canonico www/non-www del repository centrale anche per la provenienza dei pacchetti. Altri domini restano esclusi.
+
+## [9.8.36] - 2026-11-05
+
+- Catalogo con piu ZIP dello stesso plugin: selezione della versione piu recente.
+- Indice esplicito e redirect interni del catalogo supportati, mantenendo il controllo della provenienza.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [9.8.35] - 2026-11-05
+
+### Added
+- Installazione e attivazione plugin privati solo tramite azione Commander autenticata; catalogo centrale, provenienza del pacchetto, lock e controllo esito.
+- Plugin gia presenti non sovrascritti; plugin inattivi non riattivati automaticamente. Compatibilita, dipendenze e policy WordPress rispettate.
+- Test locali su dispatcher, firma/replay, installazione e attivazione. Nessuna installazione live.
+
+## [9.8.34] - 2026-11-05
+
+### Added
+- Operazione remota firmata `update_core` per il flusso completo Commander: plugin, temi, core WordPress e traduzioni.
+- Aggiornamento tramite Core_Upgrader con rollback nativo abilitato, lock MCU, autorizzazione Commander e rispetto delle impostazioni WordPress sulle modifiche ai file.
+- Pacchetto e versione scelti dalle offerte stabili WordPress appena aggiornate sul sito, ignorando URL e versioni del chiamante; nessun downgrade o reinstallazione a parita di versione.
+- Stato del job persistito e regressioni locali su successo, errori, lock, offerte obsolete, API fallita e autorizzazione. Nessuna installazione live.
 
 ## [9.8.33] - 2026-11-03
 

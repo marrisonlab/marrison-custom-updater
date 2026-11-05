@@ -1,6 +1,71 @@
 <?php
 trait MCU_Update_Operations_Trait {
 
+    /** Resolve the core offer locally; Commander cannot supply a download or downgrade. */
+    public function mcu_remote_update_core($response, $parameters) {
+        if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {
+            return ['success' => false, 'error_code' => 'client_not_authorized', 'message' => 'Client MCU non autorizzato da Commander.'];
+        }
+        if ((defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS)
+            || (function_exists('wp_is_file_mod_allowed') && !wp_is_file_mod_allowed('update_core'))) {
+            return ['success' => false, 'error_code' => 'file_mods_disabled', 'message' => 'Modifiche ai file disabilitate sul sito.'];
+        }
+        $lock = $this->mcu_acquire_update_lock('commander_core_update');
+        if (is_wp_error($lock)) {
+            return ['success' => false, 'error_code' => $lock->get_error_code(), 'message' => $lock->get_error_message()];
+        }
+        @ignore_user_abort(true);
+        @set_time_limit(0);
+        $buffer_level = ob_get_level();
+        ob_start();
+        try {
+            if (!class_exists('Core_Upgrader')) require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+            if (!function_exists('request_filesystem_credentials')) require_once ABSPATH . 'wp-admin/includes/file.php';
+            if (!function_exists('wp_version_check')) require_once ABSPATH . WPINC . '/update.php';
+            $started = time();
+            // WordPress advances last_checked before HTTP, even when that HTTP fails.
+            // Drop previous offers so a failed refresh cannot reuse their packages.
+            delete_site_transient('update_core');
+            wp_version_check([], true);
+            $updates = get_site_transient('update_core');
+            if (!is_object($updates) || !isset($updates->updates) || !is_array($updates->updates)
+                || (int) ($updates->last_checked ?? 0) < $started
+                || (string) ($updates->version_checked ?? '') !== (string) $GLOBALS['wp_version']) {
+                return ['success' => false, 'error_code' => 'core_check_failed', 'message' => 'Impossibile verificare gli aggiornamenti WordPress.'];
+            }
+            $offer = null;
+            $current = false;
+            $upgrade_found = false;
+            foreach ($updates->updates as $candidate) {
+                if (!is_object($candidate)) continue;
+                if (($candidate->response ?? '') === 'latest') $current = true;
+                if (($candidate->response ?? '') === 'upgrade') $upgrade_found = true;
+                $version = (string) ($candidate->current ?? $candidate->version ?? '');
+                if (($candidate->response ?? '') !== 'upgrade' || !preg_match('/^\d+(?:\.\d+){1,3}$/D', $version)
+                    || !version_compare($version, (string) $GLOBALS['wp_version'], '>')) continue;
+                if (!$offer || version_compare($version, (string) ($offer->current ?? $offer->version), '>')) $offer = $candidate;
+            }
+            if (!$offer) {
+                return $current && !$upgrade_found
+                    ? ['success' => true, 'already_current' => true, 'updated_core_version' => (string) $GLOBALS['wp_version'], 'message' => 'Core WordPress gia aggiornato.']
+                    : ['success' => false, 'error_code' => 'core_update_not_found', 'message' => 'Nessun aggiornamento stabile WordPress verificabile.'];
+            }
+            $skin = new Automatic_Upgrader_Skin();
+            $upgrader = new Core_Upgrader($skin);
+            $result = $upgrader->upgrade($offer, ['attempt_rollback' => true]);
+            $target = (string) ($offer->current ?? $offer->version);
+            $success = is_string($result) && preg_match('/^\d+(?:\.\d+){1,3}$/D', $result) && version_compare($result, $target, '>=');
+            $error = is_wp_error($result) ? $result->get_error_message()
+                : $this->mcu_upgrader_failure_message($skin, $upgrader, 'Aggiornamento core WordPress non completato.');
+            return ['success' => (bool) $success, 'updated_core_version' => $success ? $result : '',
+                'error_code' => $success ? '' : (is_wp_error($result) ? $result->get_error_code() : 'core_update_failed'),
+                'message' => $success ? 'Core WordPress aggiornato alla versione ' . $result . '.' : sanitize_text_field($error)];
+        } finally {
+            while (ob_get_level() > $buffer_level) ob_end_clean();
+            $this->mcu_release_update_lock($lock);
+        }
+    }
+
     /** Language packages are resolved by WordPress; no caller-supplied downloads. */
     public function mcu_remote_update_translations($response, $parameters) {
         if (!\MarrisonCustomUpdater\MaintenanceClient\Settings::repository_config_managed()) {

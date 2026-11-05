@@ -3,7 +3,7 @@
  * Plugin Name: WP Master Updater
  * Plugin URI:  https://github.com/marrisonlab/marrison-custom-updater
  * Description: This plugin is used to add a personal repository for updating plugins.
- * Version: 9.8.33
+ * Version: 9.8.39
  * Author: Marrisonlab
  * Author URI:  https://marrisonlab.com
  * Text Domain: marrison-custom-updater
@@ -20,7 +20,7 @@ if (!defined('MCU_PLUGIN_URL')) {
     define('MCU_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('MCU_PLUGIN_VERSION')) {
-    define('MCU_PLUGIN_VERSION', '9.8.33');
+    define('MCU_PLUGIN_VERSION', '9.8.39');
 }
 
 require_once __DIR__ . '/includes/mcu-client/class-settings.php';
@@ -29,6 +29,8 @@ require_once __DIR__ . '/includes/mcu-client/class-plugin.php';
 require_once __DIR__ . '/includes/traits/SchedulingTrait.php';
 require_once __DIR__ . '/includes/traits/AdminUITrait.php';
 require_once __DIR__ . '/includes/traits/UpdateOperationsTrait.php';
+require_once __DIR__ . '/includes/traits/InstallOperationsTrait.php';
+require_once __DIR__ . '/includes/traits/PluginStateOperationsTrait.php';
 require_once __DIR__ . '/includes/traits/AdminUpdateQueueTrait.php';
 
 register_activation_hook(__FILE__, ['MarrisonCustomUpdater\\MaintenanceClient\\Installer', 'activate']);
@@ -46,6 +48,8 @@ class MCU_Custom_Updater {
     use MCU_Scheduling_Trait;
     use MCU_Admin_UI_Trait;
     use MCU_Update_Operations_Trait;
+    use MCU_Install_Operations_Trait;
+    use MCU_Plugin_State_Operations_Trait;
     use MCU_Admin_Update_Queue_Trait;
 
     public function __construct() {
@@ -86,6 +90,9 @@ class MCU_Custom_Updater {
         add_filter('mcu_remote_remove_plugin', [$this, 'mcu_remote_remove_plugin'], 10, 2);
         add_filter('mcu_remote_update_theme', [$this, 'mcu_remote_update_theme'], 10, 2);
         add_filter('mcu_remote_update_translations', [$this, 'mcu_remote_update_translations'], 10, 2);
+        add_filter('mcu_remote_set_plugin_active', [$this, 'mcu_remote_set_plugin_active'], 10, 2);
+        add_filter('mcu_remote_install_plugin', [$this, 'mcu_remote_install_plugin'], 10, 2);
+        add_filter('mcu_remote_update_core', [$this, 'mcu_remote_update_core'], 10, 2);
         add_filter('mcu_refresh_self_update', [$this, 'mcu_refresh_self_update']);
         
         add_action('admin_post_marrison_download_repo_file', [$this, 'download_repo_file']);

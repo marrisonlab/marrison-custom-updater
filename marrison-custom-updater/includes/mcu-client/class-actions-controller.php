@@ -205,6 +205,8 @@ final class Actions_Controller {
 			$payload = self::cancel_master_update();
 		} elseif ( 'diagnostics_schedule_snapshot' === $operation ) {
 			$payload = self::schedule_diagnostic_snapshot();
+		} elseif ( 'set_plugin_active' === $operation ) {
+			$payload = apply_filters( 'mcu_remote_set_plugin_active', array( 'success' => false, 'error_code' => 'plugin_state_unavailable', 'message' => 'Modifica stato plugin non disponibile.' ), $parameters );
 		} elseif ( 'remove_plugin' === $operation ) {
 			$payload = apply_filters( 'mcu_remote_remove_plugin', array( 'success' => false, 'error_code' => 'remove_plugin_unavailable', 'message' => 'Rimozione plugin non disponibile.' ), $parameters );
 		} elseif ( 'update_plugin' === $operation ) {
@@ -213,6 +215,10 @@ final class Actions_Controller {
 			$payload = self::update_translations( $parameters );
 		} elseif ( 'update_theme' === $operation ) {
 			$payload = self::update_theme( $parameters );
+		} elseif ( 'install_plugin' === $operation ) {
+			$payload = self::install_plugin( $parameters );
+		} elseif ( 'update_core' === $operation ) {
+			$payload = self::update_core( $parameters );
 		} elseif ( 'set_update_exclusion' === $operation ) {
 			$payload = self::set_update_exclusion( $parameters );
 		} elseif ( 'update_all' === $operation ) {
@@ -335,6 +341,20 @@ final class Actions_Controller {
 					'schema_version' => 1,
 				),
 				'update_translations' => array(
+					'type' => 'write', 'cost_class' => 'moderate',
+					'required' => array(),
+					'allowed_params' => array( 'job_id', 'step', 'total' ),
+					'timeout' => 300, 'schema_version' => 1,
+				),
+				'set_plugin_active' => array(
+					'type' => 'write', 'cost_class' => 'moderate', 'required' => array('plugin_file', 'expected_fingerprint', 'active'),
+					'allowed_params' => array('plugin_file', 'expected_fingerprint', 'active'), 'timeout' => 120, 'schema_version' => 1,
+				),
+				'install_plugin' => array(
+					'type' => 'write', 'cost_class' => 'moderate', 'required' => array('slug'),
+					'allowed_params' => array('slug', 'job_id'), 'timeout' => 300, 'schema_version' => 1,
+				),
+				'update_core' => array(
 					'type' => 'write', 'cost_class' => 'moderate',
 					'required' => array(),
 					'allowed_params' => array( 'job_id', 'step', 'total' ),
@@ -1018,6 +1038,69 @@ final class Actions_Controller {
 		);
 	}
 
+
+	/** Execute core through the signed action protocol, preserving the outcome for polling. */
+	private static function update_core( array $parameters ) {
+		$job_id = sanitize_text_field( (string) ( $parameters['job_id'] ?? '' ) );
+		if ( '' === $job_id ) $job_id = wp_generate_uuid4();
+		$step = max( 1, (int) ( $parameters['step'] ?? 1 ) );
+		$total = max( $step, (int) ( $parameters['total'] ?? $step ) );
+		self::save_update_status( array(
+			'job_id' => $job_id, 'operation' => 'update_core', 'status' => 'running',
+			'requested_at' => time(), 'started_at' => time(), 'finished_at' => 0,
+			'step' => $step, 'total' => $total, 'message' => 'Aggiornamento core WordPress in corso.',
+		) );
+		try {
+			$result = apply_filters( 'mcu_remote_update_core', array(
+				'success' => false, 'error_code' => 'update_core_unavailable',
+				'message' => 'Runner aggiornamento core WordPress non disponibile.',
+			), $parameters );
+			if ( ! is_array( $result ) ) throw new \RuntimeException( 'Risposta aggiornamento core non valida.' );
+		} catch ( \Throwable $e ) {
+			$result = array( 'success' => false, 'error_code' => 'core_update_failed', 'message' => 'Aggiornamento core WordPress interrotto.' );
+		}
+		$success = ! empty( $result['success'] );
+		$message = self::safe_text( (string) ( $result['message'] ?? 'Aggiornamento core WordPress non completato.' ) );
+		self::save_update_status( array_merge( self::current_update_status(), array(
+			'job_id' => $job_id, 'status' => $success ? 'completed' : 'failed',
+			'finished_at' => time(), 'message' => $message,
+			'error_code' => $success ? '' : self::safe_text( (string) ( $result['error_code'] ?? 'core_update_failed' ) ),
+			'last_result' => $result,
+		) ) );
+		return array_merge( $result, array( 'job_id' => $job_id, 'status' => $success ? 'completed' : 'failed',
+			'step' => $step, 'total' => $total, 'message' => $message ) );
+	}
+
+	private static function install_plugin( array $parameters ) {
+		$job_id = sanitize_text_field( (string) ( $parameters['job_id'] ?? '' ) );
+		if ( '' === $job_id ) $job_id = wp_generate_uuid4();
+		$step = max( 1, (int) ( $parameters['step'] ?? 1 ) );
+		$total = max( $step, (int) ( $parameters['total'] ?? $step ) );
+		self::save_update_status( array(
+			'job_id' => $job_id, 'operation' => 'install_plugin', 'status' => 'running',
+			'requested_at' => time(), 'started_at' => time(), 'finished_at' => 0,
+			'step' => $step, 'total' => $total, 'message' => 'Aggiornamento plugin privato in corso.',
+		) );
+		try {
+			$result = apply_filters( 'mcu_remote_install_plugin', array(
+				'success' => false, 'error_code' => 'install_plugin_unavailable',
+				'message' => 'Runner aggiornamento plugin privato non disponibile.',
+			), $parameters );
+			if ( ! is_array( $result ) ) throw new \RuntimeException( 'Risposta aggiornamento plugin non valida.' );
+		} catch ( \Throwable $e ) {
+			$result = array( 'success' => false, 'error_code' => 'plugin_install_failed', 'message' => 'Aggiornamento plugin privato interrotto.' );
+		}
+		$success = ! empty( $result['success'] );
+		$message = self::safe_text( (string) ( $result['message'] ?? 'Aggiornamento plugin privato non completato.' ) );
+		self::save_update_status( array_merge( self::current_update_status(), array(
+			'job_id' => $job_id, 'status' => $success ? 'completed' : 'failed',
+			'finished_at' => time(), 'message' => $message,
+			'error_code' => $success ? '' : self::safe_text( (string) ( $result['error_code'] ?? 'plugin_install_failed' ) ),
+			'last_result' => $result,
+		) ) );
+		return array_merge( $result, array( 'job_id' => $job_id, 'status' => $success ? 'completed' : 'failed',
+			'step' => $step, 'total' => $total, 'message' => $message ) );
+	}
 
 	/** Execute language packs in the same signed, synchronous update flow. */
 	private static function update_translations( array $parameters ) {

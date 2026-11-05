@@ -90,8 +90,23 @@ final class Plugin_Security {
         }
         global $wp_filesystem;
         // No deactivation hooks and no uninstall.php from a potentially infected plugin.
+        $was_active = is_plugin_active( $file );
         deactivate_plugins( $file, true );
         if ( is_plugin_active( $file ) ) { return self::failure( 'deactivation_failed', 'Disattivazione non riuscita. Nessun file rimosso.' ); }
+        if ( $was_active ) {
+            // This request booted with the plugin loaded. Its shutdown callbacks
+            // may still require files (e.g. Gravity Forms). Delete only on a new
+            // authenticated request, after WordPress boots without this plugin.
+            return array( 'success' => true, 'removal_pending' => true, 'deactivated' => true,
+                'plugin_file' => $file, 'expected_fingerprint' => $expected,
+                'message' => 'Plugin disattivato. Rimozione da completare con una nuova richiesta.' );
+        }
+        foreach ( get_included_files() as $included ) {
+            $included = $normalize( $included );
+            if ( $included === $target || 0 === strpos( $included, $target . '/' ) ) {
+                return self::failure( 'plugin_still_loaded', 'Plugin ancora caricato da altro codice: file conservati, rimozione sospesa.' );
+            }
+        }
         $deleted = $wp_filesystem->delete( $target, true );
         clearstatcache();
         wp_clean_plugins_cache( false );

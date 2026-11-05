@@ -225,7 +225,7 @@ final class Rest_Controller {
 		} catch ( \Throwable $exception ) {
 			return array(
 				'supported_read_operations'  => array(),
-				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'update_translations', 'remove_plugin', 'set_update_exclusion', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
+				'supported_write_operations' => array( 'clear_cache', 'force_sync', 'cancel_master_update', 'update_all', 'update_plugin', 'update_theme', 'update_core', 'install_plugin', 'set_plugin_active', 'update_translations', 'remove_plugin', 'set_update_exclusion', 'diagnostics_schedule_snapshot', 'revoke_repository_config', 'debug_toggle', 'debug_log_delete' ),
 				'snapshot'                   => array(
 					'available' => false,
 					'status'    => 'unavailable',
@@ -547,6 +547,7 @@ final class Rest_Controller {
 				'current_version' => sanitize_text_field( isset( $data['Version'] ) ? (string) $data['Version'] : '' ),
 				'new_version'     => sanitize_text_field( isset( $update['new_version'] ) ? (string) $update['new_version'] : '' ),
 				'type'            => sanitize_key( isset( $update['type'] ) ? (string) $update['type'] : '' ),
+				'active'          => is_plugin_active( $file ),
 				'has_update'      => ! empty( $update ),
 				'excluded'        => self::is_plugin_update_excluded( $slug, $file, $name, null ),
 			), Plugin_Security::metadata( $file, $data ) );
